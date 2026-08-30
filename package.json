@@ -1,0 +1,30 @@
+{
+  "name": "meet",
+  "version": "1.2.0",
+  "description": "Meet - Collaborative screen sharing and audio calls powered by LiveKit",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [
+    "meet",
+    "meeting",
+    "screenshare",
+    "livekit",
+    "webrtc",
+    "audio"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.7.0",
+    "jsonwebtoken": "^9.0.2",
+    "livekit-server-sdk": "^2.9.1",
+    "ws": "^8.21.3"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

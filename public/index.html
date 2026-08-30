@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Meet — Meeting Point</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤝</text></svg>">
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo"><i class="fa-solid fa-handshake"></i></span>
+        <h1>Meet</h1>
+        <span id="meetingBadge" class="meeting-badge hidden"></span>
+        <button id="copyCodeBtn" class="btn small-btn copy-top hidden" title="Copy meeting code">
+          <i class="fa-regular fa-copy"></i>
+        </button>
+      </div>
+      <div class="controls">
+        <div id="authArea" class="auth-area">
+          <button id="loginOpenBtn" class="btn small-btn">Log in</button>
+          <button id="signupOpenBtn" class="btn small-btn primary-outline">Sign up</button>
+        </div>
+        <div id="userArea" class="user-area hidden">
+          <span id="userLabel" class="user-label"></span>
+          <button id="historyBtn" class="btn icon-btn" title="Meeting history">
+            <i class="fa-solid fa-clock-rotate-left"></i>
+          </button>
+          <button id="logoutBtn" class="btn small-btn" title="Log out">Log out</button>
+        </div>
+        <button id="leaveBtn" class="btn leave-btn hidden" title="Leave meeting">
+          <i class="fa-solid fa-right-from-bracket"></i>
+          <span>Leave</span>
+        </button>
+        <button id="themeToggle" class="btn icon-btn" title="Toggle day / night">
+          <i class="fa-solid fa-moon"></i>
+        </button>
+        <button id="fullscreenBtn" class="btn icon-btn" title="Toggle app fullscreen">
+          <i class="fa-solid fa-expand"></i>
+        </button>
+      </div>
+    </header>
+
+    <!-- HOME -->
+    <section id="homeView" class="home-view">
+      <div class="home-card">
+        <h2>Start or join a meeting</h2>
+        <p class="home-sub">Create a room or enter a meeting code. Screen share &amp; audio via LiveKit.</p>
+
+        <div class="form-block">
+          <label for="createName">Meeting name</label>
+          <input id="createName" type="text" maxlength="60" placeholder="e.g. Design review" autocomplete="off">
+          <label for="createYourName">Your name</label>
+          <input id="createYourName" type="text" maxlength="40" placeholder="Your display name" autocomplete="off">
+          <button id="createBtn" class="btn primary-btn">
+            <i class="fa-solid fa-plus"></i> Create meeting
+          </button>
+          <p id="createError" class="error-msg hidden"></p>
+        </div>
+
+        <div class="divider"><span>or</span></div>
+
+        <div class="form-block">
+          <label>Meeting code</label>
+          <div class="code-inputs">
+            <input id="joinLetters" type="text" maxlength="3" placeholder="ABC" autocomplete="off" spellcheck="false">
+            <span class="code-sep">—</span>
+            <input id="joinNumbers" type="text" maxlength="3" placeholder="123" inputmode="numeric" autocomplete="off">
+          </div>
+          <label for="joinYourName">Your name</label>
+          <input id="joinYourName" type="text" maxlength="40" placeholder="Your display name" autocomplete="off">
+          <button id="joinBtn" class="btn primary-btn">
+            <i class="fa-solid fa-arrow-right-to-bracket"></i> Join meeting
+          </button>
+          <p id="joinError" class="error-msg hidden"></p>
+        </div>
+      </div>
+    </section>
+
+    <!-- HISTORY -->
+    <section id="historyView" class="history-view hidden">
+      <div class="history-card">
+        <div class="history-header">
+          <h2><i class="fa-solid fa-clock-rotate-left"></i> Meeting history</h2>
+          <button id="historyCloseBtn" class="btn small-btn">Back</button>
+        </div>
+        <p id="historyEmpty" class="history-empty hidden">No meetings yet. Create or join one while logged in.</p>
+        <ul id="historyList" class="history-list"></ul>
+        <div id="historyDetail" class="history-detail hidden">
+          <h3 id="historyDetailTitle"></h3>
+          <p id="historyDetailMeta" class="history-meta"></p>
+          <h4>Participants</h4>
+          <ul id="historyDetailParticipants" class="history-participants"></ul>
+          <button id="historyDetailBack" class="btn small-btn">Back to list</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- MEETING -->
+    <main id="meetingView" class="layout hidden">
+      <section class="col col-1" id="col1">
+        <div class="panel">
+          <h2>
+            <i class="fa-solid fa-users"></i>
+            People
+            <span id="participantCount" class="count-badge">1</span>
+          </h2>
+          <div class="content">
+            <ul class="participant-list" id="participantList"></ul>
+          </div>
+        </div>
+      </section>
+
+      <div class="resizer" id="resizer" title="Drag to resize"></div>
+
+      <section class="col col-2" id="col2">
+        <div class="panel">
+          <div class="content meeting-content">
+            <div class="screen-cards" id="screenCards"></div>
+            <div class="big-view" id="bigView">
+              <video id="remoteVideo" autoplay playsinline></video>
+              <div id="bigPlaceholder" class="placeholder">
+                <i class="fa-solid fa-desktop big-icon"></i>
+                <p>No screen selected</p>
+                <p class="sub">Click a LIVE card to watch, or share your own</p>
+              </div>
+              <div class="big-view-label" id="bigViewLabel"></div>
+              <button id="screenFsBtn" class="btn icon-btn screen-fs-btn" title="Fullscreen shared screen">
+                <i class="fa-solid fa-expand"></i>
+              </button>
+            </div>
+            <div class="call-controls">
+              <button id="shareBtn" class="btn call-btn" title="Share your screen">
+                <i class="fa-solid fa-desktop"></i>
+                <span>Share screen</span>
+              </button>
+              <button id="micBtn" class="btn call-btn" title="Toggle microphone">
+                <i class="fa-solid fa-microphone"></i>
+                <span>Mic</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <span>Meet · LiveKit media</span>
+    </footer>
+  </div>
+
+  <!-- Auth modal -->
+  <div id="authModal" class="modal hidden">
+    <div class="modal-backdrop" id="authModalBackdrop"></div>
+    <div class="modal-card">
+      <button class="modal-close" id="authModalClose" title="Close">&times;</button>
+      <div class="auth-tabs">
+        <button id="tabLogin" class="auth-tab active">Log in</button>
+        <button id="tabSignup" class="auth-tab">Sign up</button>
+      </div>
+
+      <form id="loginForm" class="auth-form">
+        <label for="loginIdentity">Email or username</label>
+        <input id="loginIdentity" type="text" autocomplete="username" required>
+        <label for="loginPassword">Password</label>
+        <input id="loginPassword" type="password" autocomplete="current-password" required>
+        <button type="submit" class="btn primary-btn full-width">Log in</button>
+        <p id="loginError" class="error-msg hidden"></p>
+      </form>
+
+      <form id="signupForm" class="auth-form hidden">
+        <label for="signupUsername">Username</label>
+        <input id="signupUsername" type="text" maxlength="24" autocomplete="username" required>
+        <label for="signupEmail">Email</label>
+        <input id="signupEmail" type="email" autocomplete="email" required>
+        <label for="signupPassword">Password (min 6)</label>
+        <input id="signupPassword" type="password" autocomplete="new-password" minlength="6" required>
+        <button type="submit" class="btn primary-btn full-width">Create account</button>
+        <p id="signupError" class="error-msg hidden"></p>
+      </form>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.9.1/dist/livekit-client.umd.min.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
