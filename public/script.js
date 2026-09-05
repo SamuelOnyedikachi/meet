@@ -468,7 +468,13 @@
 
     await disconnectLiveKit();
 
-    room = new LK.Room({ adaptiveStream: true, dynacast: true });
+    // adaptiveStream can leave screen-share black if the video element
+    // reports 0 size during layout; this app only shows one big screen so
+    // we turn it off for reliability.
+    room = new LK.Room({
+      adaptiveStream: false,
+      dynacast: true,
+    });
 
     room
       .on(LK.RoomEvent.TrackSubscribed, handleTrackSubscribed)
@@ -502,11 +508,28 @@
       await room.connect(url, tokenData.token);
       micOn = false;
       updateMicButton();
+      // Pick up any screen shares that were already published before we joined
+      attachExistingRemoteScreenTracks();
     } catch (e) {
       console.error('[LiveKit] connect failed', e);
       alert('Could not connect to media server: ' + (e.message || e));
       room = null;
     }
+  }
+
+  function attachExistingRemoteScreenTracks() {
+    if (!room) return;
+    room.remoteParticipants.forEach((participant) => {
+      participant.trackPublications.forEach((publication) => {
+        if (
+          publication.track &&
+          publication.source === LK.Track.Source.ScreenShare &&
+          publication.track.kind === LK.Track.Kind.Video
+        ) {
+          handleTrackSubscribed(publication.track, publication, participant);
+        }
+      });
+    });
   }
 
   async function disconnectLiveKit() {
@@ -527,6 +550,12 @@
 
     if (track.kind === LK.Track.Kind.Video && publication.source === LK.Track.Source.ScreenShare) {
       remoteMedia[identity].screenTrack = track;
+      // Request highest available quality for screen content
+      try {
+        if (publication.setVideoQuality && LK.VideoQuality) {
+          publication.setVideoQuality(LK.VideoQuality.HIGH);
+        }
+      } catch (_) {}
       const p = participants.find(x => x.id === identity);
       if (p && !p.sharing) { p.sharing = true; renderCards(); }
       // Auto-watch if nothing is currently selected, or if we were already waiting for this person
@@ -571,32 +600,67 @@
 
   function attachScreenToBigView(track, identity) {
     const existing = document.getElementById('lkScreenVideo');
-    if (existing) existing.remove();
+    if (existing) {
+      try { track.detach(existing); } catch (_) {}
+      existing.remove();
+    }
     if (remoteVideo) {
       remoteVideo.style.display = 'none';
       remoteVideo.classList.remove('active');
     }
-    const el = track.attach();
+
+    // Prefer attaching into a dedicated element we fully control
+    const el = document.createElement('video');
     el.id = 'lkScreenVideo';
     el.autoplay = true;
     el.playsInline = true;
-    el.muted = false;
-    el.classList.add('active'); // required — CSS hides all .big-view video unless .active
-    el.style.width = '100%';
-    el.style.height = '100%';
-    el.style.objectFit = 'contain';
-    el.style.display = 'block';
-    bigView?.insertBefore(el, bigPlaceholder);
+    el.muted = false; // screen share audio (if any) should be audible
+    el.setAttribute('playsinline', '');
+    el.setAttribute('autoplay', '');
+    el.classList.add('active');
+    // Fill the container so size is never 0 (avoids black frames / adaptive issues)
+    el.style.cssText = [
+      'position:absolute',
+      'inset:0',
+      'width:100%',
+      'height:100%',
+      'object-fit:contain',
+      'display:block',
+      'background:#0a0c10',
+      'z-index:1',
+    ].join(';');
+
+    // Attach MediaStreamTrack(s) to our element
+    track.attach(el);
+
+    bigView?.appendChild(el);
     bigPlaceholder?.classList.add('hidden');
     if (bigViewLabel) {
       const p = participants.find(x => x.id === identity);
       bigViewLabel.textContent = p ? p.name + ' is sharing' : 'Screen share';
       bigViewLabel.classList.add('visible');
     }
-    // Ensure playback (autoplay attribute alone is not always enough)
-    const playPromise = el.play();
-    if (playPromise && typeof playPromise.catch === 'function') {
-      playPromise.catch((err) => console.warn('[screen] video.play() blocked', err));
+
+    const tryPlay = () => {
+      const p = el.play();
+      if (p && typeof p.catch === 'function') {
+        p.catch((err) => console.warn('[screen] video.play() blocked', err));
+      }
+    };
+    tryPlay();
+    // Safari / some Chromium builds need a second kick after layout
+    requestAnimationFrame(() => {
+      tryPlay();
+      // Force a trivial reflow — known workaround for black video until resize
+      void el.offsetWidth;
+    });
+    setTimeout(tryPlay, 250);
+
+    // If the remote track reports dimensions later, ensure we stay visible
+    if (track.on) {
+      try {
+        track.on(LK.TrackEvent.DimensionsChanged || 'dimensionsChanged', () => tryPlay());
+      } catch (_) {}
     }
   }
 
@@ -625,10 +689,22 @@
   async function startShare() {
     if (!room?.localParticipant) { alert('Not connected to media server yet.'); return; }
     try {
-      await room.localParticipant.setScreenShareEnabled(true, { audio: true });
+      // Prefer explicit capture options so the encoder treats this as a
+      // detailed screen (text/UI) rather than a camera feed.
+      await room.localParticipant.setScreenShareEnabled(true, {
+        audio: true,
+        resolution: { width: 1920, height: 1080, frameRate: 30 },
+        contentHint: 'detail',
+      });
     } catch (e) {
       console.error(e);
-      alert('Could not start screen share. Please allow the permission.');
+      // Fallback without resolution if the browser rejects constraints
+      try {
+        await room.localParticipant.setScreenShareEnabled(true, { audio: true, contentHint: 'detail' });
+      } catch (e2) {
+        console.error(e2);
+        alert('Could not start screen share. Please allow the permission.');
+      }
     }
   }
 

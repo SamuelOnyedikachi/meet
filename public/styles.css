@@ -402,10 +402,14 @@ body.resizing .panel { pointer-events: none; }
   height: 100%;
   object-fit: contain;
   display: none;
+  background: #0a0c10;
 }
 .big-view video.active,
 .big-view video#lkScreenVideo {
   display: block !important;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
 }
 
 .placeholder {
@@ -419,6 +423,10 @@ body.resizing .panel { pointer-events: none; }
   justify-content: center;
   gap: 0.25rem;
   pointer-events: none;
+  z-index: 0;
+}
+.placeholder.hidden {
+  display: none !important;
 }
 .placeholder .big-icon { font-size: 2rem; margin-bottom: 0.35rem; opacity: 0.65; }
 .placeholder p { font-size: 0.875rem; }
