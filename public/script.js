@@ -474,6 +474,14 @@
     room = new LK.Room({
       adaptiveStream: false,
       dynacast: true,
+      // Prefer VP8 for widest compatibility (avoid intermittent AV1 black screens)
+      publishDefaults: {
+        videoCodec: 'vp8',
+        screenShareEncoding: {
+          maxBitrate: 3_000_000,
+          maxFramerate: 30,
+        },
+      },
     });
 
     room
@@ -484,6 +492,12 @@
         if (watchingId === p.identity) clearBigView();
       })
       .on(LK.RoomEvent.LocalTrackPublished, (pub) => {
+        console.log('[LiveKit] LocalTrackPublished', {
+          source: pub.source,
+          kind: pub.kind,
+          trackSid: pub.trackSid,
+          muted: pub.isMuted,
+        });
         if (pub.source === LK.Track.Source.ScreenShare) {
           isSharing = true;
           updateShareButton();
@@ -502,10 +516,31 @@
           if (me) me.sharing = false;
           renderCards();
         }
+      })
+      .on(LK.RoomEvent.ConnectionStateChanged, (state) => {
+        console.log('[LiveKit] connection state:', state);
+      })
+      .on(LK.RoomEvent.MediaDevicesError, (e) => {
+        console.error('[LiveKit] MediaDevicesError', e);
+      })
+      .on(LK.RoomEvent.SignalConnected, () => {
+        console.log('[LiveKit] signal connected');
+      })
+      .on(LK.RoomEvent.Connected, () => {
+        console.log('[LiveKit] room connected', {
+          name: room.name,
+          localIdentity: room.localParticipant?.identity,
+          remoteCount: room.remoteParticipants.size,
+        });
+      })
+      .on(LK.RoomEvent.Disconnected, (reason) => {
+        console.warn('[LiveKit] disconnected', reason);
       });
 
     try {
+      console.log('[LiveKit] connecting to', url);
       await room.connect(url, tokenData.token);
+      console.log('[LiveKit] connect OK, state=', room.state);
       micOn = false;
       updateMicButton();
       // Pick up any screen shares that were already published before we joined
@@ -550,10 +585,29 @@
 
     if (track.kind === LK.Track.Kind.Video && publication.source === LK.Track.Source.ScreenShare) {
       remoteMedia[identity].screenTrack = track;
+      console.log('[LiveKit] ScreenShare TrackSubscribed', {
+        identity,
+        trackSid: track.sid,
+        muted: track.isMuted,
+        streamState: track.streamState,
+        dimensions: track.dimensions,
+        mediaStreamTrack: track.mediaStreamTrack
+          ? {
+              id: track.mediaStreamTrack.id,
+              readyState: track.mediaStreamTrack.readyState,
+              enabled: track.mediaStreamTrack.enabled,
+              muted: track.mediaStreamTrack.muted,
+              label: track.mediaStreamTrack.label,
+            }
+          : null,
+      });
       // Request highest available quality for screen content
       try {
         if (publication.setVideoQuality && LK.VideoQuality) {
           publication.setVideoQuality(LK.VideoQuality.HIGH);
+        }
+        if (typeof publication.setSubscribed === 'function' && !publication.isSubscribed) {
+          publication.setSubscribed(true);
         }
       } catch (_) {}
       const p = participants.find(x => x.id === identity);
@@ -572,6 +626,8 @@
       el.style.display = 'none';
       document.body.appendChild(el);
       remoteMedia[identity].audioEl = el;
+      const playP = el.play();
+      if (playP && playP.catch) playP.catch(() => {});
     }
   }
 
@@ -614,7 +670,9 @@
     el.id = 'lkScreenVideo';
     el.autoplay = true;
     el.playsInline = true;
-    el.muted = false; // screen share audio (if any) should be audible
+    // Mute the *element* initially so autoplay is allowed, then unmute after play.
+    // (Browsers block unmuted autoplay; screen video itself has no audio usually.)
+    el.muted = true;
     el.setAttribute('playsinline', '');
     el.setAttribute('autoplay', '');
     el.classList.add('active');
@@ -641,25 +699,63 @@
       bigViewLabel.classList.add('visible');
     }
 
+    const mst = track.mediaStreamTrack;
+    const stream = el.srcObject;
+    console.log('[screen] attached', {
+      identity,
+      videoWidth: el.videoWidth,
+      videoHeight: el.videoHeight,
+      readyState: el.readyState,
+      paused: el.paused,
+      srcObjectTracks: stream ? stream.getTracks().map((t) => ({
+        kind: t.kind,
+        id: t.id,
+        readyState: t.readyState,
+        enabled: t.enabled,
+        muted: t.muted,
+        label: t.label,
+      })) : null,
+      mediaStreamTrack: mst
+        ? { readyState: mst.readyState, enabled: mst.enabled, muted: mst.muted, label: mst.label }
+        : null,
+      trackDimensions: track.dimensions,
+      trackMuted: track.isMuted,
+      streamState: track.streamState,
+    });
+
     const tryPlay = () => {
       const p = el.play();
       if (p && typeof p.catch === 'function') {
-        p.catch((err) => console.warn('[screen] video.play() blocked', err));
+        p.then(() => {
+          // Video can stay muted (screen share audio is a separate track)
+          console.log('[screen] playing', { videoWidth: el.videoWidth, videoHeight: el.videoHeight });
+        }).catch((err) => console.warn('[screen] video.play() blocked', err));
       }
     };
     tryPlay();
     // Safari / some Chromium builds need a second kick after layout
     requestAnimationFrame(() => {
       tryPlay();
-      // Force a trivial reflow — known workaround for black video until resize
       void el.offsetWidth;
     });
-    setTimeout(tryPlay, 250);
+    setTimeout(() => {
+      tryPlay();
+      // If still 0x0 after a moment, media is not arriving (ICE/UDP/TURN problem)
+      if (el.videoWidth === 0 && el.videoHeight === 0) {
+        console.warn(
+          '[screen] still 0x0 after attach — media frames are not arriving. ' +
+          'Check LiveKit UDP ports 50000-60000, TURN, and that LIVEKIT_URL is reachable over WSS.'
+        );
+      }
+    }, 1500);
 
-    // If the remote track reports dimensions later, ensure we stay visible
     if (track.on) {
       try {
-        track.on(LK.TrackEvent.DimensionsChanged || 'dimensionsChanged', () => tryPlay());
+        const dimEvent = (LK.TrackEvent && LK.TrackEvent.DimensionsChanged) || 'dimensionsChanged';
+        track.on(dimEvent, () => {
+          console.log('[screen] dimensions changed', track.dimensions);
+          tryPlay();
+        });
       } catch (_) {}
     }
   }
@@ -689,21 +785,45 @@
   async function startShare() {
     if (!room?.localParticipant) { alert('Not connected to media server yet.'); return; }
     try {
-      // Prefer explicit capture options so the encoder treats this as a
-      // detailed screen (text/UI) rather than a camera feed.
-      await room.localParticipant.setScreenShareEnabled(true, {
-        audio: true,
-        resolution: { width: 1920, height: 1080, frameRate: 30 },
-        contentHint: 'detail',
-      });
+      // createScreenTracks gives us the MediaStreamTrack so we can log + set contentHint
+      // before publish. Falls back to setScreenShareEnabled if createScreenTracks is unavailable.
+      if (typeof room.localParticipant.createScreenTracks === 'function') {
+        const tracks = await room.localParticipant.createScreenTracks({
+          audio: true,
+          resolution: { width: 1920, height: 1080, frameRate: 30 },
+          contentHint: 'detail',
+        });
+        for (const t of tracks) {
+          if (t.mediaStreamTrack && t.kind === 'video') {
+            try { t.mediaStreamTrack.contentHint = 'detail'; } catch (_) {}
+          }
+          console.log('[LiveKit] publishing screen track', {
+            kind: t.kind,
+            source: t.source,
+            id: t.mediaStreamTrack?.id,
+            readyState: t.mediaStreamTrack?.readyState,
+            label: t.mediaStreamTrack?.label,
+          });
+          await room.localParticipant.publishTrack(t, {
+            source: t.kind === 'video' ? LK.Track.Source.ScreenShare : LK.Track.Source.ScreenShareAudio,
+            videoCodec: 'vp8',
+            simulcast: false,
+          });
+        }
+      } else {
+        await room.localParticipant.setScreenShareEnabled(true, {
+          audio: true,
+          resolution: { width: 1920, height: 1080, frameRate: 30 },
+          contentHint: 'detail',
+        });
+      }
     } catch (e) {
-      console.error(e);
-      // Fallback without resolution if the browser rejects constraints
+      console.error('[LiveKit] startShare failed', e);
       try {
-        await room.localParticipant.setScreenShareEnabled(true, { audio: true, contentHint: 'detail' });
+        await room.localParticipant.setScreenShareEnabled(true, { audio: true });
       } catch (e2) {
         console.error(e2);
-        alert('Could not start screen share. Please allow the permission.');
+        alert('Could not start screen share. Please allow the permission.\n' + (e2.message || e.message || ''));
       }
     }
   }
