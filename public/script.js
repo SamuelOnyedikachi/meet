@@ -527,9 +527,14 @@
 
     if (track.kind === LK.Track.Kind.Video && publication.source === LK.Track.Source.ScreenShare) {
       remoteMedia[identity].screenTrack = track;
-      if (watchingId === identity) attachScreenToBigView(track, identity);
       const p = participants.find(x => x.id === identity);
       if (p && !p.sharing) { p.sharing = true; renderCards(); }
+      // Auto-watch if nothing is currently selected, or if we were already waiting for this person
+      if (!watchingId || watchingId === identity) {
+        watchingId = identity;
+        attachScreenToBigView(track, identity);
+        renderCards();
+      }
     }
 
     if (track.kind === LK.Track.Kind.Audio) {
@@ -567,19 +572,31 @@
   function attachScreenToBigView(track, identity) {
     const existing = document.getElementById('lkScreenVideo');
     if (existing) existing.remove();
-    if (remoteVideo) remoteVideo.style.display = 'none';
+    if (remoteVideo) {
+      remoteVideo.style.display = 'none';
+      remoteVideo.classList.remove('active');
+    }
     const el = track.attach();
     el.id = 'lkScreenVideo';
     el.autoplay = true;
     el.playsInline = true;
+    el.muted = false;
+    el.classList.add('active'); // required — CSS hides all .big-view video unless .active
     el.style.width = '100%';
     el.style.height = '100%';
     el.style.objectFit = 'contain';
+    el.style.display = 'block';
     bigView?.insertBefore(el, bigPlaceholder);
     bigPlaceholder?.classList.add('hidden');
     if (bigViewLabel) {
       const p = participants.find(x => x.id === identity);
       bigViewLabel.textContent = p ? p.name + ' is sharing' : 'Screen share';
+      bigViewLabel.classList.add('visible');
+    }
+    // Ensure playback (autoplay attribute alone is not always enough)
+    const playPromise = el.play();
+    if (playPromise && typeof playPromise.catch === 'function') {
+      playPromise.catch((err) => console.warn('[screen] video.play() blocked', err));
     }
   }
 
@@ -587,9 +604,21 @@
     watchingId = null;
     const lkVid = document.getElementById('lkScreenVideo');
     if (lkVid) try { lkVid.remove(); } catch (_) {}
-    if (remoteVideo) { remoteVideo.style.display = ''; remoteVideo.srcObject = null; }
+    if (remoteVideo) {
+      remoteVideo.style.display = '';
+      remoteVideo.srcObject = null;
+      remoteVideo.classList.remove('active');
+    }
     bigPlaceholder?.classList.remove('hidden');
-    if (bigViewLabel) bigViewLabel.textContent = '';
+    if (bigViewLabel) {
+      bigViewLabel.textContent = '';
+      bigViewLabel.classList.remove('visible');
+    }
+    // restore default placeholder text
+    if (bigPlaceholder) {
+      const p = bigPlaceholder.querySelector('p');
+      if (p) p.textContent = 'No screen selected';
+    }
     renderCards();
   }
 
@@ -643,15 +672,26 @@
 
   async function watchParticipant(remoteId) {
     if (watchingId === remoteId) return;
+    // Detach any previous screen video without wiping the new watchingId
+    const prev = document.getElementById('lkScreenVideo');
+    if (prev) try { prev.remove(); } catch (_) {}
+    if (remoteVideo) {
+      remoteVideo.style.display = 'none';
+      remoteVideo.classList.remove('active');
+    }
+
     watchingId = remoteId;
     renderCards();
     const m = remoteMedia[remoteId];
-    if (m?.screenTrack) attachScreenToBigView(m.screenTrack, remoteId);
-    else {
-      clearBigView();
-      watchingId = remoteId;
+    if (m?.screenTrack) {
+      attachScreenToBigView(m.screenTrack, remoteId);
+    } else {
+      bigPlaceholder?.classList.remove('hidden');
+      if (bigViewLabel) {
+        bigViewLabel.textContent = '';
+        bigViewLabel.classList.remove('visible');
+      }
       if (bigPlaceholder) {
-        bigPlaceholder.classList.remove('hidden');
         const p = bigPlaceholder.querySelector('p');
         if (p) p.textContent = 'Waiting for screen…';
       }

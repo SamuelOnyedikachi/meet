@@ -403,7 +403,10 @@ body.resizing .panel { pointer-events: none; }
   object-fit: contain;
   display: none;
 }
-.big-view video.active { display: block; }
+.big-view video.active,
+.big-view video#lkScreenVideo {
+  display: block !important;
+}
 
 .placeholder {
   text-align: center;
