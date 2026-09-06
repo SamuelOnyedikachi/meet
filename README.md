@@ -2,7 +2,7 @@
 
 Collaborative meeting rooms with **screen share** and **audio calls**, powered by [LiveKit](https://livekit.io).
 
-- **Sign up / log in** — username, email, password (stored in SQLite)
+- **Sign up / log in** — local SQLite auth, or **Collab Accounts** SSO when `ACCOUNTS_URL` is configured
 - **Meeting history** — past meetings you hosted or joined, with participant log
 - Create a meeting → short code (`ABC—123`)
 - Join with the code (guests allowed without login)
@@ -33,6 +33,10 @@ Active meetings stay in memory for low latency. History and accounts are persist
 | `LIVEKIT_URL` | **yes** | e.g. `wss://livekit.example.com` |
 | `LIVEKIT_API_KEY` | **yes** | LiveKit API key |
 | `LIVEKIT_API_SECRET` | **yes** | LiveKit API secret |
+| `ACCOUNTS_URL` | no | Collab Accounts base URL (e.g. `https://accounts.collab.name.ng`). Enables suite SSO. |
+| `ACCOUNTS_JWT_SECRET` / `ACCOUNTS_SECRET_KEY` | no | Same `SECRET_KEY` as Accounts for local token verification |
+
+When `ACCOUNTS_URL` is set, Meet login/signup proxies to Accounts and grants access under the **meet** product. Guests can still join without an account.
 
 ---
 

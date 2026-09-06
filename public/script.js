@@ -76,6 +76,7 @@
 
   let authToken = localStorage.getItem('meet_token') || null;
   let currentUser = null;
+  let accountsEnabled = false;
 
   function showError(el, msg) {
     if (!el) return;
@@ -119,13 +120,19 @@
 
   // ----- Auth UI -----
 
+  function displayNameOf(u) {
+    if (!u) return '';
+    return u.displayName || u.display_name || u.username || u.email || 'User';
+  }
+
   function updateAuthUI() {
     if (currentUser) {
       authArea?.classList.add('hidden');
       userArea?.classList.remove('hidden');
-      if (userLabel) userLabel.textContent = currentUser.username;
-      if (createYourName && !createYourName.value) createYourName.value = currentUser.username;
-      if (joinYourName && !joinYourName.value) joinYourName.value = currentUser.username;
+      const name = displayNameOf(currentUser);
+      if (userLabel) userLabel.textContent = name;
+      if (createYourName && !createYourName.value) createYourName.value = name;
+      if (joinYourName && !joinYourName.value) joinYourName.value = name;
     } else {
       authArea?.classList.remove('hidden');
       userArea?.classList.add('hidden');
@@ -153,7 +160,17 @@
     authModal?.classList.add('hidden');
   }
 
+  async function loadConfig() {
+    try {
+      const cfg = await api('/api/config');
+      accountsEnabled = !!cfg.accountsEnabled;
+    } catch {
+      accountsEnabled = false;
+    }
+  }
+
   async function restoreSession() {
+    await loadConfig();
     if (!authToken) {
       updateAuthUI();
       return;
@@ -180,13 +197,20 @@
     e.preventDefault();
     hideError(loginError);
     try {
-      const data = await api('/api/login', {
-        method: 'POST',
-        body: JSON.stringify({
-          login: $('loginIdentity')?.value?.trim(),
-          password: $('loginPassword')?.value,
-        }),
-      });
+      const identity = $('loginIdentity')?.value?.trim();
+      const password = $('loginPassword')?.value;
+      let data;
+      if (accountsEnabled) {
+        data = await api('/api/accounts/login', {
+          method: 'POST',
+          body: JSON.stringify({ email: identity, login: identity, password }),
+        });
+      } else {
+        data = await api('/api/login', {
+          method: 'POST',
+          body: JSON.stringify({ login: identity, password }),
+        });
+      }
       authToken = data.token;
       currentUser = data.user;
       localStorage.setItem('meet_token', authToken);
@@ -201,14 +225,26 @@
     e.preventDefault();
     hideError(signupError);
     try {
-      const data = await api('/api/signup', {
-        method: 'POST',
-        body: JSON.stringify({
-          username: $('signupUsername')?.value?.trim(),
-          email: $('signupEmail')?.value?.trim(),
-          password: $('signupPassword')?.value,
-        }),
-      });
+      const username = $('signupUsername')?.value?.trim();
+      const email = $('signupEmail')?.value?.trim();
+      const password = $('signupPassword')?.value;
+      let data;
+      if (accountsEnabled) {
+        data = await api('/api/accounts/signup', {
+          method: 'POST',
+          body: JSON.stringify({
+            username,
+            email,
+            password,
+            display_name: username,
+          }),
+        });
+      } else {
+        data = await api('/api/signup', {
+          method: 'POST',
+          body: JSON.stringify({ username, email, password }),
+        });
+      }
       authToken = data.token;
       currentUser = data.user;
       localStorage.setItem('meet_token', authToken);
@@ -505,6 +541,11 @@
           const me = participants.find(p => p.id === currentMeeting.participantId);
           if (me) me.sharing = true;
           renderCards();
+          // Show own shared screen in the main view (clicking the card must not stop share)
+          if (currentMeeting?.participantId) {
+            watchingId = null; // force re-attach
+            watchParticipant(currentMeeting.participantId);
+          }
         }
       })
       .on(LK.RoomEvent.LocalTrackUnpublished, (pub) => {
@@ -514,6 +555,9 @@
           sendWS({ type: 'stop-share' });
           const me = participants.find(p => p.id === currentMeeting?.participantId);
           if (me) me.sharing = false;
+          if (watchingId && currentMeeting && watchingId === currentMeeting.participantId) {
+            clearBigView();
+          }
           renderCards();
         }
       })
@@ -866,6 +910,35 @@
       : '<i class="fa-solid fa-microphone-slash"></i><span>Mic</span>';
   }
 
+  function getLocalScreenTrack() {
+    if (!room?.localParticipant || !LK) return null;
+    try {
+      const pubs = room.localParticipant.trackPublications
+        || room.localParticipant.tracks
+        || null;
+      if (pubs) {
+        const list = pubs.values ? Array.from(pubs.values()) : Object.values(pubs);
+        for (const pub of list) {
+          if (!pub) continue;
+          const src = pub.source;
+          const isScreen = src === LK.Track.Source.ScreenShare
+            || src === 'screen_share'
+            || src === 'screenShare';
+          if (isScreen && pub.track && pub.track.kind === 'video') return pub.track;
+          if (isScreen && pub.videoTrack) return pub.videoTrack;
+        }
+      }
+      // Fallback: iterate video track publications helper if present
+      if (typeof room.localParticipant.getTrackPublication === 'function') {
+        const pub = room.localParticipant.getTrackPublication(LK.Track.Source.ScreenShare);
+        if (pub?.track) return pub.track;
+      }
+    } catch (e) {
+      console.warn('[screen] getLocalScreenTrack', e);
+    }
+    return null;
+  }
+
   async function watchParticipant(remoteId) {
     if (watchingId === remoteId) return;
     // Detach any previous screen video without wiping the new watchingId
@@ -878,6 +951,27 @@
 
     watchingId = remoteId;
     renderCards();
+
+    // Self view while sharing: use local publication (not remoteMedia)
+    const isSelf = currentMeeting && remoteId === currentMeeting.participantId;
+    if (isSelf) {
+      const localTrack = getLocalScreenTrack();
+      if (localTrack) {
+        attachScreenToBigView(localTrack, remoteId);
+        return;
+      }
+      bigPlaceholder?.classList.remove('hidden');
+      if (bigViewLabel) {
+        bigViewLabel.textContent = 'You are sharing';
+        bigViewLabel.classList.add('visible');
+      }
+      if (bigPlaceholder) {
+        const p = bigPlaceholder.querySelector('p');
+        if (p) p.textContent = 'Your screen is being shared…';
+      }
+      return;
+    }
+
     const m = remoteMedia[remoteId];
     if (m?.screenTrack) {
       attachScreenToBigView(m.screenTrack, remoteId);
@@ -934,9 +1028,16 @@
 
   async function onCardClick(p) {
     if (!currentMeeting) return;
+    // Own card: if already sharing, show own screen in the main view (do not stop sharing).
+    // Start sharing only when not currently sharing.
     if (p.id === currentMeeting.participantId) {
-      if (isSharing) await stopShare();
-      else await startShare();
+      const sharing = isSharing || p.sharing;
+      if (sharing) {
+        if (watchingId === p.id) return;
+        await watchParticipant(p.id);
+        return;
+      }
+      await startShare();
       return;
     }
     if (!p.sharing) return;
@@ -954,8 +1055,8 @@
       name: data.name,
       participantId: data.participantId,
       participantName: isHost
-        ? (createYourName?.value || currentUser?.username || 'Host').trim() || 'Host'
-        : (joinYourName?.value || currentUser?.username || 'Guest').trim() || 'Guest',
+        ? (createYourName?.value || displayNameOf(currentUser) || 'Host').trim() || 'Host'
+        : (joinYourName?.value || displayNameOf(currentUser) || 'Guest').trim() || 'Guest',
       isHost: !!isHost,
     };
     participants = data.participants || [];
@@ -1068,7 +1169,7 @@
   createBtn?.addEventListener('click', async () => {
     hideError(createError);
     const name = (createName?.value || '').trim();
-    const yourName = (createYourName?.value || currentUser?.username || 'Host').trim() || 'Host';
+    const yourName = (createYourName?.value || displayNameOf(currentUser) || 'Host').trim() || 'Host';
     if (name.length < 2) {
       showError(createError, 'Please enter a meeting name (min 2 characters)');
       return;
@@ -1102,7 +1203,7 @@
     hideError(joinError);
     const letters = normalizeLetters(joinLetters?.value);
     const numbers = normalizeNumbers(joinNumbers?.value);
-    const yourName = (joinYourName?.value || currentUser?.username || 'Guest').trim() || 'Guest';
+    const yourName = (joinYourName?.value || displayNameOf(currentUser) || 'Guest').trim() || 'Guest';
     if (letters.length !== 3 || numbers.length !== 3) {
       showError(joinError, 'Enter 3 letters and 3 numbers');
       return;

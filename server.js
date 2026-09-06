@@ -17,6 +17,11 @@ const LIVEKIT_URL = process.env.LIVEKIT_URL || '';
 const LIVEKIT_API_KEY = process.env.LIVEKIT_API_KEY || '';
 const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET || '';
 
+// Collab Accounts (central identity). When set, Meet validates tokens against Accounts
+// and can proxy login/signup so the suite shares one identity.
+const ACCOUNTS_URL = (process.env.ACCOUNTS_URL || '').replace(/\/$/, '');
+const ACCOUNTS_JWT_SECRET = process.env.ACCOUNTS_JWT_SECRET || process.env.ACCOUNTS_SECRET_KEY || '';
+
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
@@ -72,16 +77,125 @@ function sendJSON(res, status, data) {
   res.end(JSON.stringify(data));
 }
 
-function getAuthUser(req) {
+function getBearerToken(req) {
   const header = req.headers.authorization || '';
-  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+  return header.startsWith('Bearer ') ? header.slice(7) : null;
+}
+
+/** Resolve auth: local Meet JWT, or Accounts access token (shared secret or /auth/me). */
+async function getAuthUser(req) {
+  const token = getBearerToken(req);
   if (!token) return null;
+
+  // 1) Local Meet JWT
   try {
     const payload = jwt.verify(token, JWT_SECRET);
-    const user = db.getUserById(payload.sub);
-    return user || null;
-  } catch {
-    return null;
+    if (payload && payload.sub != null && payload.type !== 'access') {
+      const user = db.getUserById(payload.sub);
+      if (user) return { ...user, source: 'meet' };
+    }
+  } catch (_) {}
+
+  // 2) Accounts JWT via shared secret (same SECRET_KEY as Accounts)
+  if (ACCOUNTS_JWT_SECRET) {
+    try {
+      const payload = jwt.verify(token, ACCOUNTS_JWT_SECRET);
+      if (payload && payload.sub && (payload.type === 'access' || !payload.type)) {
+        const linked = ensureAccountsUser({
+          accountsId: String(payload.sub),
+          email: payload.email || null,
+          username: payload.username || payload.display_name || null,
+          displayName: payload.display_name || payload.username || null,
+        });
+        return linked;
+      }
+    } catch (_) {}
+  }
+
+  // 3) Accounts remote validation
+  if (ACCOUNTS_URL) {
+    try {
+      const res = await fetch(ACCOUNTS_URL + '/auth/me', {
+        headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const u = data.user || data;
+        if (u && (u.id || u.email)) {
+          return ensureAccountsUser({
+            accountsId: String(u.id),
+            email: u.email || null,
+            username: u.username || null,
+            displayName: u.display_name || u.username || u.email || 'User',
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('[accounts] /auth/me failed', e.message);
+    }
+  }
+
+  return null;
+}
+
+/** Map an Accounts identity into a local Meet user row for history linkage. */
+function ensureAccountsUser({ accountsId, email, username, displayName }) {
+  const externalKey = 'accounts:' + accountsId;
+  let user = db.getUserByUsername(externalKey);
+  if (!user && email) {
+    try {
+      user = db.getUserByEmail && db.getUserByEmail(email);
+    } catch (_) {}
+  }
+  if (user) {
+    return {
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      displayName: displayName || user.username,
+      accountsId,
+      source: 'accounts',
+    };
+  }
+  // Create a shadow local user so meeting history can FK to users.id
+  const uname = (username && String(username).slice(0, 40)) || externalKey;
+  const em = email || (accountsId + '@accounts.local');
+  try {
+    const created = db.createUser({
+      username: uname.startsWith('accounts:') ? uname : ('acc_' + accountsId.slice(0, 8) + '_' + uname).slice(0, 40),
+      email: em,
+      passwordHash: bcrypt.hashSync('accounts-sso-' + accountsId, 8),
+    });
+    return {
+      id: created.id,
+      username: created.username,
+      email: created.email,
+      displayName: displayName || created.username,
+      accountsId,
+      source: 'accounts',
+    };
+  } catch (e) {
+    // Race / unique conflict — re-fetch
+    user = db.getUserByUsername(externalKey) || (db.getUserByEmail && db.getUserByEmail(em));
+    if (user) {
+      return {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        displayName: displayName || user.username,
+        accountsId,
+        source: 'accounts',
+      };
+    }
+    console.error('[accounts] ensure user failed', e.message);
+    return {
+      id: null,
+      username: displayName || username || 'User',
+      email: email,
+      displayName: displayName || username || 'User',
+      accountsId,
+      source: 'accounts',
+    };
   }
 }
 
@@ -97,8 +211,10 @@ function publicUser(user) {
   if (!user) return null;
   return {
     id: user.id,
-    username: user.username,
+    username: user.username || user.displayName,
     email: user.email,
+    displayName: user.displayName || user.username,
+    source: user.source || 'meet',
     createdAt: user.created_at,
   };
 }
@@ -179,6 +295,92 @@ const server = http.createServer(async (req, res) => {
   }
 
   // ----- Auth -----
+  if (urlPath === '/api/config' && req.method === 'GET') {
+    return sendJSON(res, 200, {
+      accountsUrl: ACCOUNTS_URL || null,
+      accountsEnabled: !!(ACCOUNTS_URL || ACCOUNTS_JWT_SECRET),
+      livekitConfigured: !!(LIVEKIT_URL && LIVEKIT_API_KEY && LIVEKIT_API_SECRET),
+    });
+  }
+
+  if (urlPath === '/api/accounts/login' && req.method === 'POST') {
+    if (!ACCOUNTS_URL) return sendJSON(res, 503, { error: 'Accounts not configured' });
+    try {
+      const body = await parseBody(req);
+      const email = (body.email || body.login || '').trim();
+      const password = body.password || '';
+      if (!email || !password) return sendJSON(res, 400, { error: 'Email and password required' });
+      const resA = await fetch(ACCOUNTS_URL + '/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await resA.json().catch(() => ({}));
+      if (!resA.ok) {
+        const detail = data.detail || data.error || 'Login failed';
+        return sendJSON(res, resA.status, { error: typeof detail === 'string' ? detail : 'Login failed' });
+      }
+      const access = data.access_token;
+      const u = data.user || {};
+      const linked = ensureAccountsUser({
+        accountsId: String(u.id),
+        email: u.email,
+        username: u.username,
+        displayName: u.display_name || u.username || u.email,
+      });
+      return sendJSON(res, 200, {
+        token: access,
+        user: publicUser({ ...linked, displayName: u.display_name || linked.username }),
+        products: u.products || [],
+      });
+    } catch (e) {
+      console.error('[accounts/login]', e);
+      return sendJSON(res, 502, { error: e.message || 'Accounts unreachable' });
+    }
+  }
+
+  if (urlPath === '/api/accounts/signup' && req.method === 'POST') {
+    if (!ACCOUNTS_URL) return sendJSON(res, 503, { error: 'Accounts not configured' });
+    try {
+      const body = await parseBody(req);
+      const payload = {
+        email: (body.email || '').trim(),
+        password: body.password || '',
+        display_name: (body.display_name || body.username || body.displayName || '').trim(),
+      };
+      if (body.username) payload.username = body.username;
+      if (!payload.email || !payload.password || !payload.display_name) {
+        return sendJSON(res, 400, { error: 'Email, password and name are required' });
+      }
+      const resA = await fetch(ACCOUNTS_URL + '/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await resA.json().catch(() => ({}));
+      if (!resA.ok) {
+        const detail = data.detail || data.error || 'Signup failed';
+        return sendJSON(res, resA.status, { error: typeof detail === 'string' ? detail : 'Signup failed' });
+      }
+      const access = data.access_token;
+      const u = data.user || {};
+      const linked = ensureAccountsUser({
+        accountsId: String(u.id),
+        email: u.email,
+        username: u.username,
+        displayName: u.display_name || u.username || u.email,
+      });
+      return sendJSON(res, 200, {
+        token: access,
+        user: publicUser({ ...linked, displayName: u.display_name || linked.username }),
+        products: u.products || [],
+      });
+    } catch (e) {
+      console.error('[accounts/signup]', e);
+      return sendJSON(res, 502, { error: e.message || 'Accounts unreachable' });
+    }
+  }
+
   if (urlPath === '/api/signup' && req.method === 'POST') {
     try {
       const body = await parseBody(req);
@@ -245,13 +447,13 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (urlPath === '/api/me' && req.method === 'GET') {
-    const user = getAuthUser(req);
+    const user = await getAuthUser(req);
     if (!user) return sendJSON(res, 401, { error: 'Not authenticated' });
     return sendJSON(res, 200, { user: publicUser(user) });
   }
 
   if (urlPath === '/api/history' && req.method === 'GET') {
-    const user = getAuthUser(req);
+    const user = await getAuthUser(req);
     if (!user) return sendJSON(res, 401, { error: 'Not authenticated' });
     const limit = Math.min(100, Math.max(1, parseInt(parsed.searchParams.get('limit') || '50', 10)));
     const rows = db.getHistoryForUser(user.id, limit);
@@ -270,7 +472,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (urlPath.startsWith('/api/history/') && req.method === 'GET') {
-    const user = getAuthUser(req);
+    const user = await getAuthUser(req);
     if (!user) return sendJSON(res, 401, { error: 'Not authenticated' });
     const id = parseInt(urlPath.split('/').pop(), 10);
     if (!id) return sendJSON(res, 400, { error: 'Invalid id' });
@@ -334,10 +536,10 @@ const server = http.createServer(async (req, res) => {
       if (!name || name.length < 2) return sendJSON(res, 400, { error: 'Meeting name must be at least 2 characters' });
       if (name.length > 60) return sendJSON(res, 400, { error: 'Meeting name too long' });
 
-      const authUser = getAuthUser(req);
+      const authUser = await getAuthUser(req);
       const code = generateCode();
       const hostId = body.participantId || 'host-' + Date.now();
-      const hostName = (body.participantName || authUser?.username || 'Host').trim() || 'Host';
+      const hostName = (body.participantName || authUser?.displayName || authUser?.username || 'Host').trim() || 'Host';
 
       const historyId = db.startMeetingHistory({
         code,
@@ -403,9 +605,9 @@ const server = http.createServer(async (req, res) => {
         return sendJSON(res, 403, { error: 'Meeting is full (max 20)' });
       }
 
-      const authUser = getAuthUser(req);
+      const authUser = await getAuthUser(req);
       const participantId = body.participantId || 'user-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
-      const participantName = (body.participantName || authUser?.username || 'Guest').trim() || 'Guest';
+      const participantName = (body.participantName || authUser?.displayName || authUser?.username || 'Guest').trim() || 'Guest';
 
       if (!meeting.participants.has(participantId)) {
         meeting.participants.set(participantId, {
@@ -614,5 +816,10 @@ server.listen(PORT, '0.0.0.0', () => {
   }
   if (JWT_SECRET === 'change-me-in-production-meet-secret-key-32chars') {
     console.warn('[WARN] Using default JWT_SECRET — set JWT_SECRET in production.');
+  }
+  if (ACCOUNTS_URL) {
+    console.log(`[Accounts] SSO enabled → ${ACCOUNTS_URL}`);
+  } else {
+    console.log('[Accounts] ACCOUNTS_URL not set — using local Meet auth only');
   }
 });
