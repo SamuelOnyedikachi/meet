@@ -388,14 +388,36 @@
 
   let wsStatusEl = null;
   function setWsStatus(text, isError) {
-    if (!wsStatusEl) {
-      wsStatusEl = document.createElement('div');
-      wsStatusEl.id = 'wsDebugStatus';
-      wsStatusEl.style.cssText = 'position:fixed;bottom:8px;right:8px;z-index:99999;font:11px/1.4 monospace;padding:4px 8px;border-radius:6px;background:rgba(0,0,0,0.75);color:#fff;max-width:60vw;opacity:0.85;pointer-events:none;';
-      document.body.appendChild(wsStatusEl);
+    const live = document.getElementById('liveStatus');
+    const liveText = document.getElementById('liveStatusText');
+    const raw = String(text || '').toLowerCase();
+
+    let label = text;
+    let state = 'idle';
+    if (isError || /fail|error|closed|left/.test(raw)) {
+      label = /left/.test(raw) ? 'Left' : 'Offline';
+      state = 'error';
+    } else if (/connect/.test(raw) && !/connected/.test(raw)) {
+      label = 'Connecting…';
+      state = 'connecting';
+    } else if (/connected|open|live|ok/.test(raw)) {
+      label = 'Live';
+      state = 'live';
     }
-    wsStatusEl.textContent = 'WS: ' + text;
-    wsStatusEl.style.background = isError ? 'rgba(180,30,30,0.85)' : 'rgba(0,0,0,0.75)';
+
+    if (live && liveText) {
+      liveText.textContent = label;
+      live.classList.remove('is-live', 'is-connecting', 'is-error', 'is-idle');
+      live.classList.add('is-' + state);
+      live.classList.remove('hidden');
+    }
+
+    // Keep a minimal non-debug footer hint only while developing is not needed —
+    // remove floating WS overlay if present.
+    if (wsStatusEl) {
+      try { wsStatusEl.remove(); } catch (_) {}
+      wsStatusEl = null;
+    }
   }
 
   function getWsUrl() {
@@ -1148,18 +1170,26 @@
     else document.exitFullscreen?.();
   });
 
-  if (resizer && col1) {
+    if (resizer && col1 && meetingView) {
     let dragging = false;
-    resizer.addEventListener('mousedown', (e) => { dragging = true; e.preventDefault(); });
-    window.addEventListener('mousemove', (e) => {
-      if (!dragging || !meetingView) return;
-      const rect = meetingView.getBoundingClientRect();
-      let pct = ((e.clientX - rect.left) / rect.width) * 100;
-      pct = Math.max(15, Math.min(50, pct));
-      col1.style.flex = `0 0 ${pct}%`;
+    resizer.addEventListener('mousedown', (e) => {
+      dragging = true;
+      resizer.classList.add('active');
+      e.preventDefault();
     });
-    window.addEventListener('mouseup', () => { dragging = false; });
+    window.addEventListener('mouseup', () => {
+      dragging = false;
+      resizer.classList.remove('active');
+    });
+    window.addEventListener('mousemove', (e) => {
+      if (!dragging) return;
+      const rect = meetingView.getBoundingClientRect();
+      let px = e.clientX - rect.left;
+      px = Math.max(220, Math.min(rect.width * 0.45, px));
+      meetingView.style.gridTemplateColumns = px + 'px 5px minmax(0, 1fr)';
+    });
   }
+
 
   copyCodeBtn?.addEventListener('click', async () => {
     if (!currentMeeting) return;

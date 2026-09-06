@@ -72,6 +72,8 @@ html.dark body, body.dark {
   flex-direction: column;
   height: 100vh;
   height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* ===== Topbar ===== */
@@ -281,35 +283,39 @@ body.dark .history-card {
   margin-top: 0.5rem;
 }
 
-/* ===== Meeting layout (matches HTML: .layout .col .col-1 .col-2) ===== */
+/* ===== Meeting layout (grid — reliable height + columns) ===== */
 .layout,
 .meeting-view {
-  flex: 1;
-  display: flex;
+  flex: 1 1 auto;
   min-height: 0;
+  height: 0; /* force flex child to use remaining app height */
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) 5px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
+  width: 100%;
 }
 
 .col {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
 }
 
 .col-1,
 .col1 {
-  width: 300px;
-  min-width: 220px;
-  max-width: 42%;
+  grid-column: 1;
   background: var(--surface);
-  border-right: 1px solid var(--border);
+  border-right: none;
   overflow: hidden;
 }
 
 .col-2,
 .col2 {
-  flex: 1;
-  min-width: 0;
+  grid-column: 3;
   background: transparent;
 }
 
@@ -318,6 +324,7 @@ body.dark .history-card {
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  overflow: hidden;
 }
 
 .panel > h2 {
@@ -354,8 +361,11 @@ body.dark .history-card {
   display: flex;
   flex-direction: column;
   gap: 0.65rem;
+  flex: 1 1 auto;
+  min-height: 0;
   height: 100%;
   padding: 0.75rem !important;
+  overflow: hidden;
 }
 
 .participant-list {
@@ -448,11 +458,12 @@ body.dark .history-card {
 }
 
 .resizer {
+  grid-column: 2;
   width: 5px;
   cursor: col-resize;
   background: transparent;
   position: relative;
-  flex-shrink: 0;
+  align-self: stretch;
 }
 .resizer::after {
   content: "";
@@ -469,7 +480,7 @@ body.dark .history-card {
 }
 
 .big-view {
-  flex: 1;
+  flex: 1 1 auto;
   position: relative;
   background: #0c0e14;
   overflow: hidden;
@@ -477,7 +488,8 @@ body.dark .history-card {
   align-items: center;
   justify-content: center;
   border-radius: 12px;
-  min-height: 200px;
+  min-height: 0;
+  height: 100%;
   border: 1px solid var(--border);
 }
 
@@ -726,6 +738,66 @@ body.dark .history-card {
 }
 .history-participants li { margin-bottom: 0.35rem; }
 
+
+/* Live / connecting status pill */
+.live-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-left: 0.35rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  user-select: none;
+}
+.live-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+}
+.live-status.is-live {
+  color: var(--accent-green);
+  border-color: rgba(32, 166, 83, 0.35);
+  background: var(--success-soft);
+}
+.live-status.is-live .live-status-dot {
+  background: var(--accent-green);
+  box-shadow: 0 0 0 0 rgba(32, 166, 83, 0.55);
+  animation: live-blink 1.4s ease-out infinite;
+}
+.live-status.is-connecting {
+  color: #B45309;
+  border-color: rgba(234, 179, 8, 0.4);
+  background: rgba(234, 179, 8, 0.12);
+}
+.live-status.is-connecting .live-status-dot {
+  background: #EAB308;
+  animation: live-pulse 1s ease-in-out infinite;
+}
+.live-status.is-error {
+  color: var(--danger);
+  border-color: rgba(220, 38, 38, 0.35);
+  background: rgba(220, 38, 38, 0.08);
+}
+.live-status.is-error .live-status-dot {
+  background: var(--danger);
+}
+@keyframes live-blink {
+  0% { box-shadow: 0 0 0 0 rgba(32, 166, 83, 0.55); opacity: 1; }
+  70% { box-shadow: 0 0 0 8px rgba(32, 166, 83, 0); opacity: 1; }
+  100% { box-shadow: 0 0 0 0 rgba(32, 166, 83, 0); opacity: 0.85; }
+}
+@keyframes live-pulse {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+
 /* Footer */
 .footer, .app-footer {
   height: var(--footer-h);
@@ -740,13 +812,18 @@ body.dark .history-card {
 }
 
 @media (max-width: 720px) {
-  .layout, .meeting-view { flex-direction: column; }
+  .layout, .meeting-view {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(160px, 34%) 1fr;
+  }
   .col-1, .col1 {
-    width: 100%;
-    max-width: 100%;
-    max-height: 38%;
-    border-right: none;
+    grid-column: 1;
+    grid-row: 1;
     border-bottom: 1px solid var(--border);
+  }
+  .col-2, .col2 {
+    grid-column: 1;
+    grid-row: 2;
   }
   .resizer { display: none; }
 }
