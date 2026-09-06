@@ -122,7 +122,12 @@
 
   function displayNameOf(u) {
     if (!u) return '';
-    return u.displayName || u.display_name || u.username || u.email || 'User';
+    const bad = (v) => !v || /^accounts:/.test(v) || /^acc_/.test(v) || /@accounts\.local$/.test(v);
+    const emailName = u.email && String(u.email).split('@')[0];
+    for (const c of [u.displayName, u.display_name, u.username, emailName]) {
+      if (c && !bad(c)) return String(c);
+    }
+    return 'User';
   }
 
   function updateAuthUI() {

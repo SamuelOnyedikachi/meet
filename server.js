@@ -101,6 +101,24 @@ async function getAuthUser(req) {
     try {
       const payload = jwt.verify(token, ACCOUNTS_JWT_SECRET);
       if (payload && payload.sub && (payload.type === 'access' || !payload.type)) {
+        // Prefer live profile from Accounts so we get display_name / email
+        if (ACCOUNTS_URL && (!payload.email || !payload.display_name)) {
+          try {
+            const res = await fetch(ACCOUNTS_URL + '/auth/me', {
+              headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' },
+            });
+            if (res.ok) {
+              const data = await res.json();
+              const u = data.user || data;
+              return ensureAccountsUser({
+                accountsId: String(u.id || payload.sub),
+                email: u.email || payload.email || null,
+                username: u.username || null,
+                displayName: u.display_name || u.username || u.email || null,
+              });
+            }
+          } catch (_) {}
+        }
         const linked = ensureAccountsUser({
           accountsId: String(payload.sub),
           email: payload.email || null,
@@ -139,61 +157,93 @@ async function getAuthUser(req) {
 }
 
 /** Map an Accounts identity into a local Meet user row for history linkage. */
-function ensureAccountsUser({ accountsId, email, username, displayName }) {
-  const externalKey = 'accounts:' + accountsId;
-  let user = db.getUserByUsername(externalKey);
-  if (!user && email) {
-    try {
-      user = db.getUserByEmail && db.getUserByEmail(email);
-    } catch (_) {}
+function isInternalUsername(name) {
+  if (!name) return true;
+  const s = String(name);
+  return s.startsWith('accounts:') || s.startsWith('acc_') || s.endsWith('@accounts.local');
+}
+
+function niceDisplayName({ displayName, username, email, accountsId }) {
+  const candidates = [displayName, username, email && String(email).split('@')[0], 'User'];
+  for (const c of candidates) {
+    if (c && !isInternalUsername(c)) return String(c).trim().slice(0, 80);
   }
+  return 'User';
+}
+
+function ensureAccountsUser({ accountsId, email, username, displayName }) {
+  const id = String(accountsId || '').trim();
+  const em = (email && String(email).trim().toLowerCase()) || (id ? id + '@accounts.local' : null);
+  const pretty = niceDisplayName({ displayName, username, email: em, accountsId: id });
+
+  // Prefer lookup by real email so we don't create duplicate shadow rows
+  let user = null;
+  if (em && !em.endsWith('@accounts.local')) {
+    try { user = db.getUserByEmail(em); } catch (_) {}
+  }
+  // Legacy rows keyed as accounts:<uuid>
+  if (!user && id) {
+    try { user = db.getUserByUsername('accounts:' + id); } catch (_) {}
+  }
+  if (!user && username && !isInternalUsername(username)) {
+    try { user = db.getUserByUsername(username); } catch (_) {}
+  }
+
   if (user) {
     return {
       id: user.id,
       username: user.username,
       email: user.email,
-      displayName: displayName || user.username,
-      accountsId,
+      displayName: pretty,
+      accountsId: id,
       source: 'accounts',
     };
   }
-  // Create a shadow local user so meeting history can FK to users.id
-  const uname = (username && String(username).slice(0, 40)) || externalKey;
-  const em = email || (accountsId + '@accounts.local');
+
+  // Create a shadow local user for history FK — never store accounts:uuid as the visible name
+  const base =
+    (username && !isInternalUsername(username) && String(username).replace(/[^a-zA-Z0-9_]/g, '').slice(0, 16)) ||
+    (em && !em.endsWith('@accounts.local') && em.split('@')[0].replace(/[^a-zA-Z0-9_]/g, '').slice(0, 16)) ||
+    'user';
+  const uname = ('u' + id.replace(/-/g, '').slice(0, 8) + '_' + base).slice(0, 40).toLowerCase();
+
   try {
     const created = db.createUser({
-      username: uname.startsWith('accounts:') ? uname : ('acc_' + accountsId.slice(0, 8) + '_' + uname).slice(0, 40),
-      email: em,
-      passwordHash: bcrypt.hashSync('accounts-sso-' + accountsId, 8),
+      username: uname,
+      email: em || (id + '@accounts.local'),
+      passwordHash: bcrypt.hashSync('accounts-sso-' + id, 8),
     });
     return {
       id: created.id,
       username: created.username,
       email: created.email,
-      displayName: displayName || created.username,
-      accountsId,
+      displayName: pretty,
+      accountsId: id,
       source: 'accounts',
     };
   } catch (e) {
-    // Race / unique conflict — re-fetch
-    user = db.getUserByUsername(externalKey) || (db.getUserByEmail && db.getUserByEmail(em));
+    user = null;
+    try { user = db.getUserByEmail(em); } catch (_) {}
+    if (!user) {
+      try { user = db.getUserByUsername(uname); } catch (_) {}
+    }
     if (user) {
       return {
         id: user.id,
         username: user.username,
         email: user.email,
-        displayName: displayName || user.username,
-        accountsId,
+        displayName: pretty,
+        accountsId: id,
         source: 'accounts',
       };
     }
     console.error('[accounts] ensure user failed', e.message);
     return {
       id: null,
-      username: displayName || username || 'User',
-      email: email,
-      displayName: displayName || username || 'User',
-      accountsId,
+      username: pretty,
+      email: em,
+      displayName: pretty,
+      accountsId: id,
       source: 'accounts',
     };
   }
@@ -209,11 +259,17 @@ function signToken(user) {
 
 function publicUser(user) {
   if (!user) return null;
+  const displayName = niceDisplayName({
+    displayName: user.displayName || user.display_name,
+    username: user.username,
+    email: user.email,
+    accountsId: user.accountsId,
+  });
   return {
     id: user.id,
-    username: user.username || user.displayName,
+    username: isInternalUsername(user.username) ? displayName : (user.username || displayName),
     email: user.email,
-    displayName: user.displayName || user.username,
+    displayName,
     source: user.source || 'meet',
     createdAt: user.created_at,
   };
@@ -570,7 +626,7 @@ const server = http.createServer(async (req, res) => {
       const authUser = await getAuthUser(req);
       const code = generateCode();
       const hostId = body.participantId || 'host-' + Date.now();
-      const hostName = (body.participantName || authUser?.displayName || authUser?.username || 'Host').trim() || 'Host';
+      const hostName = (body.participantName || authUser?.displayName || (!authUser?.username || isInternalUsername(authUser.username) ? null : authUser.username) || (authUser?.email && authUser.email.split('@')[0]) || 'Host').trim() || 'Host';
 
       const historyId = db.startMeetingHistory({
         code,
@@ -638,7 +694,7 @@ const server = http.createServer(async (req, res) => {
 
       const authUser = await getAuthUser(req);
       const participantId = body.participantId || 'user-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
-      const participantName = (body.participantName || authUser?.displayName || authUser?.username || 'Guest').trim() || 'Guest';
+      const participantName = (body.participantName || authUser?.displayName || (!authUser?.username || isInternalUsername(authUser.username) ? null : authUser.username) || (authUser?.email && authUser.email.split('@')[0]) || 'Guest').trim() || 'Guest';
 
       if (!meeting.participants.has(participantId)) {
         meeting.participants.set(participantId, {
