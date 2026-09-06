@@ -19,7 +19,7 @@ const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET || '';
 
 // Collab Accounts (central identity). When set, Meet validates tokens against Accounts
 // and can proxy login/signup so the suite shares one identity.
-const ACCOUNTS_URL = (process.env.ACCOUNTS_URL || '').replace(/\/$/, '');
+const ACCOUNTS_URL = (process.env.ACCOUNTS_URL || 'https://accounts.collab.name.ng').replace(/\/$/, '');
 const ACCOUNTS_JWT_SECRET = process.env.ACCOUNTS_JWT_SECRET || process.env.ACCOUNTS_SECRET_KEY || '';
 
 const MIME = {
@@ -290,15 +290,12 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
-  if (urlPath === '/api/config' && req.method === 'GET') {
-    return sendJSON(res, 200, { livekitUrl: LIVEKIT_URL || null });
-  }
-
-  // ----- Auth -----
+  // ----- Auth / suite config -----
   if (urlPath === '/api/config' && req.method === 'GET') {
     return sendJSON(res, 200, {
       accountsUrl: ACCOUNTS_URL || null,
       accountsEnabled: !!(ACCOUNTS_URL || ACCOUNTS_JWT_SECRET),
+      livekitUrl: LIVEKIT_URL || null,
       livekitConfigured: !!(LIVEKIT_URL && LIVEKIT_API_KEY && LIVEKIT_API_SECRET),
     });
   }
@@ -426,6 +423,40 @@ const server = http.createServer(async (req, res) => {
 
       if (!login || !password) {
         return sendJSON(res, 400, { error: 'Login and password are required' });
+      }
+
+      // Prefer Collab Accounts when configured (suite SSO)
+      if (ACCOUNTS_URL) {
+        try {
+          const resA = await fetch(ACCOUNTS_URL + '/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ email: login, password }),
+          });
+          const data = await resA.json().catch(() => ({}));
+          if (resA.ok && data.access_token) {
+            const u = data.user || {};
+            const linked = ensureAccountsUser({
+              accountsId: String(u.id),
+              email: u.email,
+              username: u.username,
+              displayName: u.display_name || u.username || u.email,
+            });
+            return sendJSON(res, 200, {
+              token: data.access_token,
+              user: publicUser({ ...linked, displayName: u.display_name || linked.username }),
+              products: u.products || [],
+            });
+          }
+          // If Accounts rejects, fall through to local only when identity is not an email-looking Accounts attempt
+          // Still surface Accounts error for email logins
+          if (login.includes('@')) {
+            const detail = data.detail || data.error || 'Invalid credentials';
+            return sendJSON(res, 401, { error: typeof detail === 'string' ? detail : 'Invalid credentials' });
+          }
+        } catch (e) {
+          console.warn('[login] Accounts unreachable, trying local:', e.message);
+        }
       }
 
       const row = db.findUserByLogin(login);

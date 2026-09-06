@@ -164,6 +164,7 @@
     try {
       const cfg = await api('/api/config');
       accountsEnabled = !!cfg.accountsEnabled;
+      livekitUrl = cfg.livekitUrl || livekitUrl || null;
     } catch {
       accountsEnabled = false;
     }
@@ -199,17 +200,29 @@
     try {
       const identity = $('loginIdentity')?.value?.trim();
       const password = $('loginPassword')?.value;
+      if (!identity || !password) {
+        showError(loginError, 'Email and password are required');
+        return;
+      }
+      await loadConfig();
       let data;
-      if (accountsEnabled) {
+      // Always try suite Accounts SSO first (email + password from Collab Accounts)
+      try {
         data = await api('/api/accounts/login', {
           method: 'POST',
           body: JSON.stringify({ email: identity, login: identity, password }),
         });
-      } else {
-        data = await api('/api/login', {
-          method: 'POST',
-          body: JSON.stringify({ login: identity, password }),
-        });
+      } catch (accountsErr) {
+        // If Accounts is not configured on server, fall back to local Meet auth
+        const msg = (accountsErr && accountsErr.message) || '';
+        if (/not configured|503|unreachable|Failed to fetch|NetworkError/i.test(msg) && !accountsEnabled) {
+          data = await api('/api/login', {
+            method: 'POST',
+            body: JSON.stringify({ login: identity, email: identity, password }),
+          });
+        } else {
+          throw accountsErr;
+        }
       }
       authToken = data.token;
       currentUser = data.user;
@@ -217,7 +230,7 @@
       updateAuthUI();
       closeAuthModal();
     } catch (err) {
-      showError(loginError, err.message);
+      showError(loginError, err.message || 'Invalid credentials');
     }
   });
 
@@ -229,7 +242,7 @@
       const email = $('signupEmail')?.value?.trim();
       const password = $('signupPassword')?.value;
       let data;
-      if (accountsEnabled) {
+      try {
         data = await api('/api/accounts/signup', {
           method: 'POST',
           body: JSON.stringify({
@@ -239,11 +252,16 @@
             display_name: username,
           }),
         });
-      } else {
-        data = await api('/api/signup', {
-          method: 'POST',
-          body: JSON.stringify({ username, email, password }),
-        });
+      } catch (accountsErr) {
+        const msg = (accountsErr && accountsErr.message) || '';
+        if (/not configured|503|unreachable|Failed to fetch|NetworkError/i.test(msg) && !accountsEnabled) {
+          data = await api('/api/signup', {
+            method: 'POST',
+            body: JSON.stringify({ username, email, password }),
+          });
+        } else {
+          throw accountsErr;
+        }
       }
       authToken = data.token;
       currentUser = data.user;
@@ -469,13 +487,6 @@
   }
 
   // ----- LiveKit -----
-
-  async function loadConfig() {
-    try {
-      const cfg = await api('/api/config');
-      livekitUrl = cfg.livekitUrl || null;
-    } catch (_) {}
-  }
 
   async function connectLiveKit() {
     if (!LK || !currentMeeting) return;
