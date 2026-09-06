@@ -797,7 +797,10 @@ const server = http.createServer(async (req, res) => {
       if (err.code === 'ENOENT') {
         fs.readFile(path.join(PUBLIC, 'index.html'), (e2, html) => {
           if (e2) { res.writeHead(404); return res.end('Not found'); }
-          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+          res.writeHead(200, {
+            'Content-Type': 'text/html; charset=utf-8',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+          });
           res.end(html);
         });
         return;
@@ -806,7 +809,16 @@ const server = http.createServer(async (req, res) => {
       return res.end('Server error');
     }
     const ext = path.extname(filePath).toLowerCase();
-    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+    const type = MIME[ext] || 'application/octet-stream';
+    // HTML always revalidate; hashed/query-busted assets can be short-cached
+    const cache =
+      ext === '.html' || staticPath === '/index.html'
+        ? 'no-cache, no-store, must-revalidate'
+        : 'public, max-age=60, must-revalidate';
+    res.writeHead(200, {
+      'Content-Type': type,
+      'Cache-Control': cache,
+    });
     res.end(data);
   });
 });
