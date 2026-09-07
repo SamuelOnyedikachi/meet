@@ -181,20 +181,51 @@ html.dark body, body.dark {
 .home-view, .history-view {
   flex: 1;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   padding: 1.5rem;
   overflow: auto;
+  gap: 1.5rem;
+}
+
+.home-intro {
+  text-align: center;
+  max-width: 520px;
+}
+
+.home-intro h2 {
+  font-size: 1.5rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  margin-bottom: 0.4rem;
+}
+
+.home-sub {
+  font-size: 0.95rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.home-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  justify-content: center;
+  width: 100%;
+  max-width: 920px;
 }
 
 .home-card, .history-card {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 16px;
-  padding: 2rem 1.75rem;
-  max-width: 420px;
+  overflow: hidden;
   width: 100%;
+  max-width: 420px;
   box-shadow: 0 4px 24px rgba(92, 93, 226, 0.06);
+  display: flex;
+  flex-direction: column;
 }
 
 html.dark .home-card,
@@ -204,20 +235,38 @@ body.dark .history-card {
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25);
 }
 
-.home-card h2 {
-  font-size: 1.25rem;
+.card-image {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.card-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.card-body {
+  padding: 1.5rem 1.5rem 1.75rem;
+}
+
+.home-card h3 {
+  font-size: 1.15rem;
   font-weight: 650;
   letter-spacing: -0.02em;
-  margin-bottom: 0.35rem;
-}
-.home-sub {
-  font-size: 0.9rem;
-  color: var(--text-muted);
-  line-height: 1.5;
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
 }
 
 .form-block { margin-bottom: 0.5rem; }
+
+/* History card keeps its own padding */
+.history-card {
+  padding: 2rem 1.75rem;
+}
 .form-block label,
 .auth-form label {
   display: block;

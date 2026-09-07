@@ -49,36 +49,54 @@
 
     <!-- HOME -->
     <section id="homeView" class="home-view">
-      <div class="home-card">
+      <div class="home-intro">
         <h2>Start or join a meeting</h2>
-        <p class="home-sub">Create a room or enter a meeting code. Screen share &amp; audio via LiveKit.</p>
+        <p class="home-sub">Jump into a video call with friends or teammates — share your screen and talk face to face.</p>
+      </div>
 
-        <div class="form-block">
-          <label for="createName">Meeting name</label>
-          <input id="createName" type="text" maxlength="60" placeholder="e.g. Design review" autocomplete="off">
-          <label for="createYourName">Your name</label>
-          <input id="createYourName" type="text" maxlength="40" placeholder="Your display name" autocomplete="off">
-          <button id="createBtn" class="btn primary-btn">
-            <i class="fa-solid fa-plus"></i> Create meeting
-          </button>
-          <p id="createError" class="error-msg hidden"></p>
+      <div class="home-cards">
+        <!-- Create card -->
+        <div class="home-card create-card">
+          <div class="card-image">
+            <img src="images/create-meeting.webp" alt="Create a new meeting" width="640" height="360" loading="lazy">
+          </div>
+          <div class="card-body">
+            <h3>Create a meeting</h3>
+            <div class="form-block">
+              <label for="createName">Meeting name</label>
+              <input id="createName" type="text" maxlength="60" placeholder="e.g. Design review" autocomplete="off">
+              <label for="createYourName">Your name</label>
+              <input id="createYourName" type="text" maxlength="40" placeholder="Your display name" autocomplete="off">
+              <button id="createBtn" class="btn primary-btn">
+                <i class="fa-solid fa-plus"></i> Create meeting
+              </button>
+              <p id="createError" class="error-msg hidden"></p>
+            </div>
+          </div>
         </div>
 
-        <div class="divider"><span>or</span></div>
-
-        <div class="form-block">
-          <label>Meeting code</label>
-          <div class="code-inputs">
-            <input id="joinLetters" type="text" maxlength="3" placeholder="ABC" autocomplete="off" spellcheck="false">
-            <span class="code-sep">—</span>
-            <input id="joinNumbers" type="text" maxlength="3" placeholder="123" inputmode="numeric" autocomplete="off">
+        <!-- Join card -->
+        <div class="home-card join-card">
+          <div class="card-image">
+            <img src="images/join-meeting.webp" alt="Join an existing meeting" width="640" height="360" loading="lazy">
           </div>
-          <label for="joinYourName">Your name</label>
-          <input id="joinYourName" type="text" maxlength="40" placeholder="Your display name" autocomplete="off">
-          <button id="joinBtn" class="btn primary-btn">
-            <i class="fa-solid fa-arrow-right-to-bracket"></i> Join meeting
-          </button>
-          <p id="joinError" class="error-msg hidden"></p>
+          <div class="card-body">
+            <h3>Join a meeting</h3>
+            <div class="form-block">
+              <label>Meeting code</label>
+              <div class="code-inputs">
+                <input id="joinLetters" type="text" maxlength="3" placeholder="ABC" autocomplete="off" spellcheck="false">
+                <span class="code-sep">—</span>
+                <input id="joinNumbers" type="text" maxlength="3" placeholder="123" inputmode="numeric" autocomplete="off">
+              </div>
+              <label for="joinYourName">Your name</label>
+              <input id="joinYourName" type="text" maxlength="40" placeholder="Your display name" autocomplete="off">
+              <button id="joinBtn" class="btn primary-btn">
+                <i class="fa-solid fa-arrow-right-to-bracket"></i> Join meeting
+              </button>
+              <p id="joinError" class="error-msg hidden"></p>
+            </div>
+          </div>
         </div>
       </div>
     </section>
