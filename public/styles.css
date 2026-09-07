@@ -1008,7 +1008,7 @@ body.dark .history-card {
   display: flex;
   gap: 8px;
   padding: 10px;
-  margin: 14px 0 0;
+  margin-bottom: 3px;
   background: #20232c;
   border: 1px solid #303441;
   border-radius: 10px;
