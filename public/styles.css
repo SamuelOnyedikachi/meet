@@ -1008,7 +1008,7 @@ body.dark .history-card {
   display: flex;
   gap: 8px;
   padding: 10px;
-  margin-bottom: 3px;
+  margin: 0;
   background: #20232c;
   border: 1px solid #303441;
   border-radius: 10px;
@@ -1041,7 +1041,7 @@ body.dark .history-card {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-bottom: 4px;
+  margin-top: 4px;
   min-height: 118px;
 }
 .chat-msg {
