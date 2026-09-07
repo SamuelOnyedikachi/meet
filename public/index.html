@@ -63,10 +63,8 @@
           <div class="card-body">
             <h3>Create a meeting</h3>
             <div class="form-block">
-              <label for="createName">Meeting name</label>
-              <input id="createName" type="text" maxlength="60" placeholder="e.g. Design review" autocomplete="off">
-              <label for="createYourName">Your name</label>
-              <input id="createYourName" type="text" maxlength="40" placeholder="Your display name" autocomplete="off">
+              <input id="createName" type="text" maxlength="60" placeholder="Meeting name (e.g. Design review)" autocomplete="off" aria-label="Meeting name">
+              <input id="createYourName" type="text" maxlength="40" placeholder="Your name" autocomplete="off" aria-label="Your name">
               <button id="createBtn" class="btn primary-btn">
                 <i class="fa-solid fa-plus"></i> Create meeting
               </button>
@@ -83,14 +81,12 @@
           <div class="card-body">
             <h3>Join a meeting</h3>
             <div class="form-block">
-              <label>Meeting code</label>
               <div class="code-inputs">
-                <input id="joinLetters" type="text" maxlength="3" placeholder="ABC" autocomplete="off" spellcheck="false">
+                <input id="joinLetters" type="text" maxlength="3" placeholder="ABC" autocomplete="off" spellcheck="false" aria-label="Meeting code letters">
                 <span class="code-sep">—</span>
-                <input id="joinNumbers" type="text" maxlength="3" placeholder="123" inputmode="numeric" autocomplete="off">
+                <input id="joinNumbers" type="text" maxlength="3" placeholder="123" inputmode="numeric" autocomplete="off" aria-label="Meeting code numbers">
               </div>
-              <label for="joinYourName">Your name</label>
-              <input id="joinYourName" type="text" maxlength="40" placeholder="Your display name" autocomplete="off">
+              <input id="joinYourName" type="text" maxlength="40" placeholder="Your name" autocomplete="off" aria-label="Your name">
               <button id="joinBtn" class="btn primary-btn">
                 <i class="fa-solid fa-arrow-right-to-bracket"></i> Join meeting
               </button>

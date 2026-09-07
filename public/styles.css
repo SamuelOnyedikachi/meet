@@ -184,7 +184,7 @@ html.dark body, body.dark {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 1.5rem;
+  padding: 2.25rem 1.5rem 2rem;
   overflow: auto;
   gap: 1.5rem;
 }
