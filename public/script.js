@@ -78,6 +78,68 @@
   let currentUser = null;
   let accountsEnabled = false;
 
+  const SESSION_KEY = 'meet_session';
+
+  /** Parse meeting code from path: /ABC-123, /ABC/123, /abc123 */
+  function parseMeetingCodeFromPath(pathname) {
+    const path = (pathname || location.pathname || '/').replace(/\/+$/, '') || '/';
+    if (path === '/' || path.startsWith('/api')) return null;
+    // /ABC-123 or /ABC_123
+    let m = path.match(/^\/([A-Za-z]{3})[-_](\d{3})$/);
+    if (m) return (m[1] + m[2]).toUpperCase();
+    // /ABC/123
+    m = path.match(/^\/([A-Za-z]{3})\/(\d{3})$/);
+    if (m) return (m[1] + m[2]).toUpperCase();
+    // /ABC123
+    m = path.match(/^\/([A-Za-z]{3})(\d{3})$/);
+    if (m) return (m[1] + m[2]).toUpperCase();
+    return null;
+  }
+
+  function meetingPath(code) {
+    const c = String(code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (c.length !== 6) return '/';
+    return '/' + c.slice(0, 3) + '-' + c.slice(3);
+  }
+
+  function setMeetingUrl(code, replace) {
+    const path = meetingPath(code);
+    if (location.pathname === path) return;
+    if (replace) history.replaceState({ meet: code }, '', path);
+    else history.pushState({ meet: code }, '', path);
+  }
+
+  function clearMeetingUrl(replace) {
+    if (location.pathname === '/' || location.pathname === '') return;
+    if (replace) history.replaceState({}, '', '/');
+    else history.pushState({}, '', '/');
+  }
+
+  function saveSession(meeting) {
+    if (!meeting) {
+      try { sessionStorage.removeItem(SESSION_KEY); } catch (_) {}
+      return;
+    }
+    try {
+      sessionStorage.setItem(SESSION_KEY, JSON.stringify({
+        code: meeting.code,
+        participantId: meeting.participantId,
+        participantName: meeting.participantName,
+        isHost: !!meeting.isHost,
+      }));
+    } catch (_) {}
+  }
+
+  function loadSession() {
+    try {
+      const raw = sessionStorage.getItem(SESSION_KEY);
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch (_) {
+      return null;
+    }
+  }
+
   function showError(el, msg) {
     if (!el) return;
     el.textContent = msg;
@@ -454,6 +516,25 @@
     socket.onmessage = (ev) => {
       let msg;
       try { msg = JSON.parse(ev.data); } catch { return; }
+      if (msg.type === 'meeting-ended') {
+        // Server closed the room (empty or 12h inactivity)
+        stopPolling();
+        if (wsRetryTimer) clearTimeout(wsRetryTimer);
+        if (ws) { try { ws.onclose = null; ws.close(); } catch (_) {} ws = null; }
+        disconnectLiveKit();
+        clearBigView();
+        currentMeeting = null;
+        participants = [];
+        saveSession(null);
+        clearMeetingUrl(true);
+        meetingView?.classList.add('hidden');
+        homeView?.classList.remove('hidden');
+        leaveBtn?.classList.add('hidden');
+        meetingBadge?.classList.add('hidden');
+        copyCodeBtn?.classList.add('hidden');
+        setWsStatus('ended');
+        return;
+      }
       if (msg.type === 'participants' || msg.type === 'participant-joined' ||
           msg.type === 'participant-left' || msg.type === 'share-started' || msg.type === 'share-stopped') {
         participants = msg.participants || [];
@@ -505,7 +586,12 @@
             if (!still) clearBigView();
           }
         }
-      } catch (_) {}
+      } catch (e) {
+        // Meeting no longer exists (ended / 12h inactivity)
+        if (e && /not found|404/i.test(String(e.message || e))) {
+          leaveMeeting();
+        }
+      }
     }, 3000);
   }
 
@@ -1085,26 +1171,32 @@
 
   // ----- Meeting lifecycle -----
 
-  async function showMeeting(data, isHost) {
+  async function showMeeting(data, isHost, opts = {}) {
+    const participantName = opts.participantName
+      || (isHost
+        ? (createYourName?.value || displayNameOf(currentUser) || 'Host').trim() || 'Host'
+        : (joinYourName?.value || displayNameOf(currentUser) || 'Guest').trim() || 'Guest');
+
     currentMeeting = {
       code: data.code,
-      letters: data.letters,
-      numbers: data.numbers,
+      letters: data.letters || data.code.slice(0, 3),
+      numbers: data.numbers || data.code.slice(3),
       name: data.name,
       participantId: data.participantId,
-      participantName: isHost
-        ? (createYourName?.value || displayNameOf(currentUser) || 'Host').trim() || 'Host'
-        : (joinYourName?.value || displayNameOf(currentUser) || 'Guest').trim() || 'Guest',
+      participantName,
       isHost: !!isHost,
     };
     participants = data.participants || [];
+
+    saveSession(currentMeeting);
+    setMeetingUrl(currentMeeting.code, !!opts.replaceUrl);
 
     homeView?.classList.add('hidden');
     historyView?.classList.add('hidden');
     meetingView?.classList.remove('hidden');
     leaveBtn?.classList.remove('hidden');
     if (meetingBadge) {
-      meetingBadge.textContent = formatCode(data.letters, data.numbers);
+      meetingBadge.textContent = formatCode(currentMeeting.letters, currentMeeting.numbers);
       meetingBadge.classList.remove('hidden');
     }
     copyCodeBtn?.classList.remove('hidden');
@@ -1136,6 +1228,8 @@
     clearBigView();
     currentMeeting = null;
     participants = [];
+    saveSession(null);
+    clearMeetingUrl(false);
 
     meetingView?.classList.add('hidden');
     homeView?.classList.remove('hidden');
@@ -1194,7 +1288,8 @@
   copyCodeBtn?.addEventListener('click', async () => {
     if (!currentMeeting) return;
     try {
-      await navigator.clipboard.writeText(currentMeeting.letters + currentMeeting.numbers);
+      const shareUrl = location.origin + meetingPath(currentMeeting.code);
+      await navigator.clipboard.writeText(shareUrl);
       copyCodeBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
       setTimeout(() => { copyCodeBtn.innerHTML = '<i class="fa-regular fa-copy"></i>'; }, 1500);
     } catch (_) {}
@@ -1226,7 +1321,7 @@
         method: 'POST',
         body: JSON.stringify({ name, participantName: yourName }),
       });
-      await showMeeting(data, true);
+      await showMeeting(data, true, { participantName: yourName });
     } catch (e) {
       showError(createError, e.message);
     } finally {
@@ -1260,7 +1355,7 @@
         method: 'POST',
         body: JSON.stringify({ letters, numbers, participantName: yourName }),
       });
-      await showMeeting(data, false);
+      await showMeeting(data, false, { participantName: yourName });
     } catch (e) {
       showError(joinError, e.message);
     } finally {
@@ -1268,18 +1363,66 @@
     }
   });
 
-  window.addEventListener('beforeunload', () => {
-    if (currentMeeting) {
-      const payload = JSON.stringify({
-        code: currentMeeting.code,
-        participantId: currentMeeting.participantId,
+  /** Rejoin from URL (refresh or shared link). Keeps same participantId when possible. */
+  async function tryRejoinFromUrl() {
+    const code = parseMeetingCodeFromPath(location.pathname);
+    if (!code) return false;
+
+    const session = loadSession();
+    const sameSession = session && session.code === code;
+    const participantName = (sameSession && session.participantName)
+      || displayNameOf(currentUser)
+      || 'Guest';
+    const participantId = sameSession ? session.participantId : undefined;
+    const isHost = !!(sameSession && session.isHost);
+
+    try {
+      const body = {
+        code,
+        letters: code.slice(0, 3),
+        numbers: code.slice(3),
+        participantName,
+      };
+      if (participantId) body.participantId = participantId;
+
+      const data = await api('/api/join', {
+        method: 'POST',
+        body: JSON.stringify(body),
       });
-      if (navigator.sendBeacon) {
-        const blob = new Blob([payload], { type: 'application/json' });
-        navigator.sendBeacon('/api/leave', blob);
+      await showMeeting(data, isHost, { participantName, replaceUrl: true });
+      return true;
+    } catch (e) {
+      // Meeting gone or invalid — clear URL and session
+      saveSession(null);
+      clearMeetingUrl(true);
+      console.warn('[rejoin]', e.message || e);
+      return false;
+    }
+  }
+
+  window.addEventListener('popstate', async () => {
+    const code = parseMeetingCodeFromPath(location.pathname);
+    if (code) {
+      if (currentMeeting && currentMeeting.code === code) return;
+      if (currentMeeting) {
+        // Leaving via back without calling leave API would leave ghost — clean up UI only
+        stopPolling();
+        if (wsRetryTimer) clearTimeout(wsRetryTimer);
+        if (ws) { try { ws.onclose = null; ws.close(); } catch (_) {} ws = null; }
+        await disconnectLiveKit();
+        clearBigView();
+        currentMeeting = null;
+        participants = [];
       }
+      await tryRejoinFromUrl();
+    } else if (currentMeeting) {
+      // Navigated to / — treat as leave
+      await leaveMeeting();
     }
   });
 
-  restoreSession();
+  // Do NOT leave on refresh — session + URL allow seamless rejoin.
+  // Leave only when the user clicks Leave (or navigates away via back to home).
+
+  restoreSession().then(() => tryRejoinFromUrl());
 })();

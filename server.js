@@ -29,15 +29,55 @@ const MIME = {
   '.json': 'application/json',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
+  '.webp': 'image/webp',
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
   '.woff2': 'font/woff2',
 };
 
 // Active meetings (runtime only)
-// code -> { name, hostId, hostUserId, historyId, createdAt, participants: Map }
+// code -> { name, hostId, hostUserId, historyId, createdAt, lastActivity, participants: Map }
 const meetings = new Map();
 const clients = new Map();
+
+/** Kill meetings with no activity for this long (12 hours) */
+const MEETING_INACTIVITY_MS = 12 * 60 * 60 * 1000;
+const MEETING_CLEANUP_INTERVAL_MS = 15 * 60 * 1000; // check every 15 min
+
+function touchMeeting(code) {
+  const meeting = meetings.get(code);
+  if (meeting) meeting.lastActivity = Date.now();
+}
+
+function endMeeting(code, reason = 'ended') {
+  const meeting = meetings.get(code);
+  if (!meeting) return;
+  if (meeting.historyId) {
+    try { db.endMeetingHistory(meeting.historyId); } catch (_) {}
+  }
+  for (const [pid] of meeting.participants) {
+    const ws = clients.get(pid);
+    if (ws) {
+      try {
+        ws.send(JSON.stringify({ type: 'meeting-ended', reason }));
+        ws.close();
+      } catch (_) {}
+      clients.delete(pid);
+    }
+  }
+  meetings.delete(code);
+  console.log(`[meeting] ended ${code} (${reason})`);
+}
+
+function cleanupInactiveMeetings() {
+  const now = Date.now();
+  for (const [code, meeting] of meetings) {
+    const last = meeting.lastActivity || meeting.createdAt || 0;
+    if (now - last >= MEETING_INACTIVITY_MS) {
+      endMeeting(code, 'inactivity');
+    }
+  }
+}
 
 function generateCode() {
   const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -651,12 +691,14 @@ const server = http.createServer(async (req, res) => {
         userId: authUser ? authUser.id : null,
       });
 
+      const now = Date.now();
       meetings.set(code, {
         name,
         hostId,
         hostUserId: authUser ? authUser.id : null,
         historyId,
-        createdAt: Date.now(),
+        createdAt: now,
+        lastActivity: now,
         participants,
       });
 
@@ -678,8 +720,14 @@ const server = http.createServer(async (req, res) => {
   if (urlPath === '/api/join' && req.method === 'POST') {
     try {
       const body = await parseBody(req);
-      const letters = (body.letters || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3);
-      const numbers = (body.numbers || '').replace(/\D/g, '').slice(0, 3);
+      let letters = (body.letters || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3);
+      let numbers = (body.numbers || '').replace(/\D/g, '').slice(0, 3);
+      // Also accept full code: "ABC123" or "ABC-123"
+      if ((!letters || !numbers) && body.code) {
+        const raw = String(body.code).toUpperCase().replace(/[^A-Z0-9]/g, '');
+        letters = raw.slice(0, 3).replace(/[^A-Z]/g, '');
+        numbers = raw.slice(3).replace(/\D/g, '').slice(0, 3);
+      }
       const code = letters + numbers;
 
       if (letters.length !== 3 || numbers.length !== 3) {
@@ -714,7 +762,13 @@ const server = http.createServer(async (req, res) => {
           });
           db.updateMaxParticipants(meeting.historyId, meeting.participants.size);
         }
+      } else {
+        // Rejoin: refresh display name if provided
+        const existing = meeting.participants.get(participantId);
+        if (participantName && existing) existing.name = participantName;
       }
+
+      meeting.lastActivity = Date.now();
 
       broadcast(code, {
         type: 'participant-joined',
@@ -736,9 +790,10 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (urlPath.startsWith('/api/meeting/') && req.method === 'GET') {
-    const code = urlPath.split('/').pop().toUpperCase();
+    const code = urlPath.split('/').pop().toUpperCase().replace(/[^A-Z0-9]/g, '');
     const meeting = meetings.get(code);
     if (!meeting) return sendJSON(res, 404, { error: 'Meeting not found' });
+    meeting.lastActivity = Date.now();
     return sendJSON(res, 200, {
       code,
       letters: code.slice(0, 3),
@@ -752,12 +807,13 @@ const server = http.createServer(async (req, res) => {
   if (urlPath === '/api/leave' && req.method === 'POST') {
     try {
       const body = await parseBody(req);
-      const code = (body.code || '').toUpperCase();
+      const code = (body.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
       const participantId = body.participantId;
       const meeting = meetings.get(code);
       if (meeting && participantId) {
         meeting.participants.delete(participantId);
         clients.delete(participantId);
+        meeting.lastActivity = Date.now();
 
         if (meeting.historyId) {
           db.logParticipantLeave({
@@ -767,8 +823,7 @@ const server = http.createServer(async (req, res) => {
         }
 
         if (meeting.participants.size === 0) {
-          if (meeting.historyId) db.endMeetingHistory(meeting.historyId);
-          meetings.delete(code);
+          endMeeting(code, 'empty');
         } else {
           broadcast(code, {
             type: 'participant-left',
@@ -853,6 +908,7 @@ wss.on('connection', (ws, req) => {
 
       const meeting = meetings.get(meetingCode);
       if (meeting) {
+        meeting.lastActivity = Date.now();
         ws.send(JSON.stringify({
           type: 'participants',
           participants: getParticipantsList(meeting),
@@ -864,6 +920,7 @@ wss.on('connection', (ws, req) => {
     if (!participantId || !meetingCode) return;
     const meeting = meetings.get(meetingCode);
     if (!meeting) return;
+    meeting.lastActivity = Date.now();
 
     if (msg.type === 'start-share') {
       const p = meeting.participants.get(participantId);
@@ -921,4 +978,6 @@ server.listen(PORT, '0.0.0.0', () => {
   } else {
     console.log('[Accounts] ACCOUNTS_URL not set — using local Meet auth only');
   }
+  setInterval(cleanupInactiveMeetings, MEETING_CLEANUP_INTERVAL_MS);
+  console.log(`[meeting] inactivity cleanup every ${MEETING_CLEANUP_INTERVAL_MS / 60000} min (kill after ${MEETING_INACTIVITY_MS / 3600000}h)`);
 });

@@ -569,21 +569,8 @@ body.dark .history-card {
 }
 
 .big-view-label {
-  position: absolute;
-  top: 12px;
-  left: 12px;
-  background: rgba(0, 0, 0, 0.55);
-  color: #fff;
-  font-size: 0.8rem;
-  font-weight: 500;
-  padding: 0.3rem 0.65rem;
-  border-radius: 6px;
-  z-index: 5;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.2s;
+  display: none; /* overlay removed — was distracting during screen share */
 }
-.big-view-label.visible { opacity: 1; }
 
 .screen-fs-btn {
   position: absolute;
