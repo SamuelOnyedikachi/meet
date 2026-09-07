@@ -92,6 +92,14 @@ function generateCode() {
   return code;
 }
 
+/** Require a real display name — reject empty or generic Guest/Host. */
+function normalizeParticipantName(raw) {
+  const name = String(raw || '').trim().slice(0, 40);
+  if (name.length < 2) return null;
+  if (/^(guest|host)$/i.test(name)) return null;
+  return name;
+}
+
 function parseBody(req) {
   return new Promise((resolve, reject) => {
     let body = '';
@@ -636,7 +644,6 @@ const server = http.createServer(async (req, res) => {
       const body = await parseBody(req);
       const code = (body.code || '').toUpperCase();
       const participantId = body.participantId;
-      const participantName = (body.participantName || 'Guest').trim() || 'Guest';
 
       if (!code || !participantId) {
         return sendJSON(res, 400, { error: 'code and participantId are required' });
@@ -644,9 +651,14 @@ const server = http.createServer(async (req, res) => {
 
       const meeting = meetings.get(code);
       if (!meeting) return sendJSON(res, 404, { error: 'Meeting not found' });
-      if (!meeting.participants.has(participantId)) {
+      const participant = meeting.participants.get(participantId);
+      if (!participant) {
         return sendJSON(res, 403, { error: 'Not a participant of this meeting' });
       }
+
+      const participantName = normalizeParticipantName(body.participantName)
+        || participant.name
+        || 'Participant';
 
       const token = await createLiveKitToken(participantId, participantName, code);
       return sendJSON(res, 200, { token, url: LIVEKIT_URL, room: code });
@@ -666,7 +678,15 @@ const server = http.createServer(async (req, res) => {
       const authUser = await getAuthUser(req);
       const code = generateCode();
       const hostId = body.participantId || 'host-' + Date.now();
-      const hostName = (body.participantName || authUser?.displayName || (!authUser?.username || isInternalUsername(authUser.username) ? null : authUser.username) || (authUser?.email && authUser.email.split('@')[0]) || 'Host').trim() || 'Host';
+      const hostName = normalizeParticipantName(
+        body.participantName
+        || authUser?.displayName
+        || (!authUser?.username || isInternalUsername(authUser.username) ? null : authUser.username)
+        || (authUser?.email && authUser.email.split('@')[0])
+      );
+      if (!hostName) {
+        return sendJSON(res, 400, { error: 'Please enter your display name' });
+      }
 
       const historyId = db.startMeetingHistory({
         code,
@@ -742,7 +762,15 @@ const server = http.createServer(async (req, res) => {
 
       const authUser = await getAuthUser(req);
       const participantId = body.participantId || 'user-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
-      const participantName = (body.participantName || authUser?.displayName || (!authUser?.username || isInternalUsername(authUser.username) ? null : authUser.username) || (authUser?.email && authUser.email.split('@')[0]) || 'Guest').trim() || 'Guest';
+      const participantName = normalizeParticipantName(
+        body.participantName
+        || authUser?.displayName
+        || (!authUser?.username || isInternalUsername(authUser.username) ? null : authUser.username)
+        || (authUser?.email && authUser.email.split('@')[0])
+      );
+      if (!participantName) {
+        return sendJSON(res, 400, { error: 'Please enter your display name' });
+      }
 
       if (!meeting.participants.has(participantId)) {
         meeting.participants.set(participantId, {
@@ -763,9 +791,9 @@ const server = http.createServer(async (req, res) => {
           db.updateMaxParticipants(meeting.historyId, meeting.participants.size);
         }
       } else {
-        // Rejoin: refresh display name if provided
+        // Rejoin: refresh display name
         const existing = meeting.participants.get(participantId);
-        if (participantName && existing) existing.name = participantName;
+        if (existing) existing.name = participantName;
       }
 
       meeting.lastActivity = Date.now();

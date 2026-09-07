@@ -205,6 +205,21 @@
     </div>
   </div>
 
+  <!-- Display name required before joining (including join links) -->
+  <div id="nameModal" class="modal hidden">
+    <div class="modal-backdrop" id="nameModalBackdrop"></div>
+    <div class="modal-card name-modal-card">
+      <h2 class="name-modal-title">What’s your name?</h2>
+      <p class="name-modal-sub">Enter a display name so others know who’s in the meeting.</p>
+      <form id="nameForm" class="auth-form">
+        <input id="nameModalInput" type="text" maxlength="40" placeholder="Your name" autocomplete="name" required autofocus>
+        <button type="submit" class="btn primary-btn full-width">Join meeting</button>
+        <p id="nameModalError" class="error-msg hidden"></p>
+      </form>
+      <button type="button" id="nameModalCancel" class="btn small-btn name-modal-cancel">Cancel</button>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.9.1/dist/livekit-client.umd.min.js"></script>
   <script src="script.js?v=20260907a"></script>
 </body>

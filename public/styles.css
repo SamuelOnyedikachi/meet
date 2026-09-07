@@ -677,6 +677,29 @@ body.dark .history-card {
 }
 .modal-close:hover { color: var(--text); background: var(--primary-tint); }
 
+.name-modal-card {
+  text-align: center;
+}
+.name-modal-title {
+  font-size: 1.2rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  margin-bottom: 0.35rem;
+}
+.name-modal-sub {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+  margin-bottom: 1.25rem;
+}
+.name-modal-card .auth-form input {
+  text-align: center;
+}
+.name-modal-cancel {
+  margin-top: 0.75rem;
+  width: 100%;
+}
+
 .auth-tabs {
   display: flex;
   gap: 0.25rem;

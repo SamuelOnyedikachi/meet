@@ -140,6 +140,18 @@
     }
   }
 
+  /** Display name is required — reject empty or generic Guest/Host-only labels. */
+  function isValidDisplayName(name) {
+    const n = (name || '').trim();
+    if (n.length < 2) return false;
+    if (/^(guest|host)$/i.test(n)) return false;
+    return true;
+  }
+
+  function normalizeDisplayName(name) {
+    return (name || '').trim().slice(0, 40);
+  }
+
   function showError(el, msg) {
     if (!el) return;
     el.textContent = msg;
@@ -611,7 +623,7 @@
         body: JSON.stringify({
           code: currentMeeting.code,
           participantId: currentMeeting.participantId,
-          participantName: currentMeeting.participantName || 'Guest',
+          participantName: currentMeeting.participantName,
         }),
       });
     } catch (e) {
@@ -1172,10 +1184,14 @@
   // ----- Meeting lifecycle -----
 
   async function showMeeting(data, isHost, opts = {}) {
-    const participantName = opts.participantName
-      || (isHost
-        ? (createYourName?.value || displayNameOf(currentUser) || 'Host').trim() || 'Host'
-        : (joinYourName?.value || displayNameOf(currentUser) || 'Guest').trim() || 'Guest');
+    const participantName = normalizeDisplayName(
+      opts.participantName
+      || (isHost ? createYourName?.value : joinYourName?.value)
+      || displayNameOf(currentUser)
+    );
+    if (!isValidDisplayName(participantName)) {
+      throw new Error('Please enter your display name');
+    }
 
     currentMeeting = {
       code: data.code,
@@ -1310,9 +1326,14 @@
   createBtn?.addEventListener('click', async () => {
     hideError(createError);
     const name = (createName?.value || '').trim();
-    const yourName = (createYourName?.value || displayNameOf(currentUser) || 'Host').trim() || 'Host';
+    const yourName = normalizeDisplayName(createYourName?.value || displayNameOf(currentUser));
     if (name.length < 2) {
       showError(createError, 'Please enter a meeting name (min 2 characters)');
+      return;
+    }
+    if (!isValidDisplayName(yourName)) {
+      showError(createError, 'Please enter your display name');
+      createYourName?.focus();
       return;
     }
     createBtn.disabled = true;
@@ -1344,9 +1365,14 @@
     hideError(joinError);
     const letters = normalizeLetters(joinLetters?.value);
     const numbers = normalizeNumbers(joinNumbers?.value);
-    const yourName = (joinYourName?.value || displayNameOf(currentUser) || 'Guest').trim() || 'Guest';
+    const yourName = normalizeDisplayName(joinYourName?.value || displayNameOf(currentUser));
     if (letters.length !== 3 || numbers.length !== 3) {
       showError(joinError, 'Enter 3 letters and 3 numbers');
+      return;
+    }
+    if (!isValidDisplayName(yourName)) {
+      showError(joinError, 'Please enter your display name');
+      joinYourName?.focus();
       return;
     }
     joinBtn.disabled = true;
@@ -1363,18 +1389,83 @@
     }
   });
 
-  /** Rejoin from URL (refresh or shared link). Keeps same participantId when possible. */
-  async function tryRejoinFromUrl() {
-    const code = parseMeetingCodeFromPath(location.pathname);
-    if (!code) return false;
+  const nameModal = $('nameModal');
+  const nameModalInput = $('nameModalInput');
+  const nameModalError = $('nameModalError');
+  const nameForm = $('nameForm');
+  const nameModalCancel = $('nameModalCancel');
+  let pendingJoin = null; // { code, participantId, isHost, resolve, reject }
 
+  function openNameModal(prefill) {
+    hideError(nameModalError);
+    if (nameModalInput) {
+      nameModalInput.value = isValidDisplayName(prefill) ? normalizeDisplayName(prefill) : '';
+    }
+    nameModal?.classList.remove('hidden');
+    setTimeout(() => nameModalInput?.focus(), 50);
+  }
+
+  function closeNameModal() {
+    nameModal?.classList.add('hidden');
+    hideError(nameModalError);
+    pendingJoin = null;
+  }
+
+  /** Prompt for display name; resolves with valid name or rejects on cancel. */
+  function promptDisplayName(prefill) {
+    return new Promise((resolve, reject) => {
+      pendingJoin = { resolve, reject };
+      openNameModal(prefill);
+    });
+  }
+
+  nameForm?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    hideError(nameModalError);
+    const name = normalizeDisplayName(nameModalInput?.value);
+    if (!isValidDisplayName(name)) {
+      showError(nameModalError, 'Please enter your display name (at least 2 characters)');
+      nameModalInput?.focus();
+      return;
+    }
+    const pending = pendingJoin;
+    nameModal?.classList.add('hidden');
+    pendingJoin = null;
+    pending?.resolve(name);
+  });
+
+  nameModalCancel?.addEventListener('click', () => {
+    const pending = pendingJoin;
+    closeNameModal();
+    pending?.reject(new Error('cancelled'));
+  });
+
+  // Backdrop does not dismiss — name is required
+
+  async function joinWithCode(code, opts = {}) {
     const session = loadSession();
     const sameSession = session && session.code === code;
-    const participantName = (sameSession && session.participantName)
+    let participantName = normalizeDisplayName(
+      opts.participantName
+      || (sameSession && session.participantName)
       || displayNameOf(currentUser)
-      || 'Guest';
-    const participantId = sameSession ? session.participantId : undefined;
-    const isHost = !!(sameSession && session.isHost);
+    );
+    const participantId = opts.participantId
+      || (sameSession ? session.participantId : undefined);
+    const isHost = opts.isHost != null
+      ? !!opts.isHost
+      : !!(sameSession && session.isHost);
+
+    if (!isValidDisplayName(participantName)) {
+      try {
+        participantName = await promptDisplayName(participantName || displayNameOf(currentUser) || '');
+      } catch {
+        // User cancelled name prompt
+        saveSession(null);
+        clearMeetingUrl(true);
+        return false;
+      }
+    }
 
     try {
       const body = {
@@ -1392,7 +1483,6 @@
       await showMeeting(data, isHost, { participantName, replaceUrl: true });
       return true;
     } catch (e) {
-      // Meeting gone or invalid — clear URL and session
       saveSession(null);
       clearMeetingUrl(true);
       console.warn('[rejoin]', e.message || e);
@@ -1400,12 +1490,18 @@
     }
   }
 
+  /** Rejoin from URL (refresh or shared link). Always requires a real display name. */
+  async function tryRejoinFromUrl() {
+    const code = parseMeetingCodeFromPath(location.pathname);
+    if (!code) return false;
+    return joinWithCode(code);
+  }
+
   window.addEventListener('popstate', async () => {
     const code = parseMeetingCodeFromPath(location.pathname);
     if (code) {
       if (currentMeeting && currentMeeting.code === code) return;
       if (currentMeeting) {
-        // Leaving via back without calling leave API would leave ghost — clean up UI only
         stopPolling();
         if (wsRetryTimer) clearTimeout(wsRetryTimer);
         if (ws) { try { ws.onclose = null; ws.close(); } catch (_) {} ws = null; }
@@ -1416,12 +1512,11 @@
       }
       await tryRejoinFromUrl();
     } else if (currentMeeting) {
-      // Navigated to / — treat as leave
       await leaveMeeting();
     }
   });
 
-  // Do NOT leave on refresh — session + URL allow seamless rejoin.
+  // Do NOT leave on refresh — session + URL allow seamless rejoin when a name is known.
   // Leave only when the user clicks Leave (or navigates away via back to home).
 
   restoreSession().then(() => tryRejoinFromUrl());
