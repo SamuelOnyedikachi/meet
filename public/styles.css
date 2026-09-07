@@ -936,7 +936,7 @@ body.dark .history-card {
 .screen-header span:last-child { color:#59ce88; }
 .my-mock-editor { border:1px solid #2b2e38;border-radius:12px;padding:18px;background:#181b23;box-shadow:inset 0 1px 0 rgba(255,255,255,.025); }
 .my-mock-line { height:7px;border-radius:10px;background:#3b3f4b;margin-bottom:11px;opacity:.8; }.my-mock-line.wide{width:78%}.my-mock-line.medium{width:54%}.my-mock-line.short{width:34%}
-.my-mock-card { display:flex;gap:8px;padding:10px;margin:18px 0;background:#20232c;border:1px solid #303441;border-radius:10px; }
+.my-mock-card { display:flex;gap:8px;padding:10px;margin:10px;background:#20232c;border:1px solid #303441;border-radius:10px; }
 .my-mock-card span { height:54px;flex:1;border-radius:6px;background:linear-gradient(135deg,#343849,#272b35); }
 .stage-cursor { position:absolute;right:19%;bottom:19%;display:flex;align-items:center;gap:5px;color:#fff;background:#5c5de2;padding:5px 7px;border-radius:5px;font-size:8px;box-shadow:0 8px 20px rgba(0,0,0,.3); }
 .stage-cursor i { font-size:10px; }
