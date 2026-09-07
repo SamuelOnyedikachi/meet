@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link rel="stylesheet" href="styles.css?v=20260907a">
+  <link rel="stylesheet" href="styles.css?v=20260907b">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤝</text></svg>">
 </head>
 <body>
@@ -49,50 +49,140 @@
 
     <!-- HOME -->
     <section id="homeView" class="home-view">
-      <div class="home-intro">
-        <h2>Start or join a meeting</h2>
-        <p class="home-sub">Jump into a video call with friends or teammates — share your screen and talk face to face.</p>
-      </div>
+      <div class="landing-shell">
+        <div class="landing-hero">
+          <div class="hero-copy anim-fade-up">
+            <div class="landing-eyebrow">
+              <span class="eyebrow-dot"></span>
+              <span>COLLABORATIVE MEETINGS</span>
+            </div>
+            <h2>Meet, share, and <span class="hero-gradient">get things done.</span></h2>
+            <p class="home-sub">A focused meeting space for real conversations, screen sharing, and teamwork — without the clutter.</p>
 
-      <div class="home-cards">
-        <!-- Create card -->
-        <div class="home-card create-card">
-          <div class="card-image">
-            <img src="images/create-meeting.webp" alt="Create a new meeting" width="640" height="360" loading="lazy">
+            <div class="hero-pills" aria-label="Meet features">
+              <span><i class="fa-solid fa-bolt"></i> Fast to join</span>
+              <span><i class="fa-solid fa-desktop"></i> Screen sharing</span>
+              <span><i class="fa-solid fa-shield-halved"></i> Private rooms</span>
+            </div>
           </div>
-          <div class="card-body">
-            <h3>Create a meeting</h3>
-            <div class="form-block">
-              <input id="createName" type="text" maxlength="60" placeholder="Meeting name (e.g. Design review)" autocomplete="off" aria-label="Meeting name">
-              <input id="createYourName" type="text" maxlength="40" placeholder="Your name" autocomplete="off" aria-label="Your name">
-              <button id="createBtn" class="btn primary-btn">
-                <i class="fa-solid fa-plus"></i> Create meeting
-              </button>
-              <p id="createError" class="error-msg hidden"></p>
+
+          <div class="hero-stage anim-fade-in" aria-hidden="true">
+            <div class="stage-glow"></div>
+            <div class="stage-window">
+              <div class="stage-topbar">
+                <div class="stage-dots"><i></i><i></i><i></i></div>
+                <span>meet / project-sync</span>
+                <b><span class="stage-live-dot"></span> LIVE</b>
+              </div>
+              <div class="stage-body">
+                <div class="stage-sidebar">
+                  <span class="stage-label">PEOPLE</span>
+                  <div class="stage-person"><span class="stage-avatar avatar-one">J</span><span>James</span><em>Host</em></div>
+                  <div class="stage-person"><span class="stage-avatar avatar-two">A</span><span>Alex</span></div>
+                  <div class="stage-person"><span class="stage-avatar avatar-three">M</span><span>Maya</span></div>
+                </div>
+                <div class="stage-screen">
+                  <div class="screen-header"><span>Design review</span><span>● Sharing</span></div>
+                  <div class="fake-editor">
+                    <div class="fake-line wide"></div><div class="fake-line medium"></div>
+                    <div class="fake-card">
+                      <img class="fake-thumb" src="images/create-meeting.webp" alt="" loading="lazy">
+                      <img class="fake-thumb" src="images/join-meeting.webp" alt="" loading="lazy">
+                      <img class="fake-thumb" src="images/create-meeting.webp" alt="" loading="lazy">
+                    </div>
+                    <div class="fake-line short"></div><div class="fake-line wide"></div>
+                  </div>
+                  <div class="stage-cursor"><i class="fa-solid fa-arrow-pointer"></i><span>Maya</span></div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
 
-        <!-- Join card -->
-        <div class="home-card join-card">
-          <div class="card-image">
-            <img src="images/join-meeting.webp" alt="Join an existing meeting" width="640" height="360" loading="lazy">
+        <div class="landing-intent anim-fade-up" style="--delay:.1s">
+          <div>
+            <span class="section-kicker">START IN SECONDS</span>
+            <h3>What do you want to do?</h3>
+            <p>Create a room for your team or jump straight into one you've been invited to.</p>
           </div>
-          <div class="card-body">
-            <h3>Join a meeting</h3>
-            <div class="form-block">
-              <div class="code-inputs">
-                <input id="joinLetters" type="text" maxlength="3" placeholder="ABC" autocomplete="off" spellcheck="false" aria-label="Meeting code letters">
-                <span class="code-sep">—</span>
-                <input id="joinNumbers" type="text" maxlength="3" placeholder="123" inputmode="numeric" autocomplete="off" aria-label="Meeting code numbers">
+          <div class="intent-line"><span></span><i class="fa-solid fa-arrow-down"></i></div>
+        </div>
+
+        <div class="home-cards landing-meeting-cards">
+          <!-- Create card -->
+          <div class="home-card create-card landing-action-card anim-fade-up" style="--delay:.15s">
+            <div class="card-image">
+              <img src="images/create-meeting.webp" alt="Create a new meeting" width="640" height="360" loading="lazy">
+              <span class="image-badge"><i class="fa-solid fa-sparkles"></i> New room</span>
+            </div>
+            <div class="card-body">
+              <div class="card-heading-row">
+                <div class="card-icon-large"><i class="fa-solid fa-plus"></i></div>
+                <div><h3>Create a meeting</h3><span>Start a fresh room</span></div>
               </div>
-              <input id="joinYourName" type="text" maxlength="40" placeholder="Your name" autocomplete="off" aria-label="Your name">
-              <button id="joinBtn" class="btn primary-btn">
-                <i class="fa-solid fa-arrow-right-to-bracket"></i> Join meeting
-              </button>
-              <p id="joinError" class="error-msg hidden"></p>
+              <div class="form-block">
+                <input id="createName" type="text" maxlength="60" placeholder="Meeting name (e.g. Design review)" autocomplete="off" aria-label="Meeting name">
+                <input id="createYourName" type="text" maxlength="40" placeholder="Your name" autocomplete="off" aria-label="Your name">
+                <button id="createBtn" class="btn primary-btn landing-main-btn">
+                  <span>Create meeting</span><i class="fa-solid fa-arrow-right"></i>
+                </button>
+                <p id="createError" class="error-msg hidden"></p>
+              </div>
             </div>
           </div>
+
+          <!-- Join card -->
+          <div class="home-card join-card landing-action-card anim-fade-up" style="--delay:.25s">
+            <div class="card-image">
+              <img src="images/join-meeting.webp" alt="Join an existing meeting" width="640" height="360" loading="lazy">
+              <span class="image-badge"><i class="fa-solid fa-arrow-right-to-bracket"></i> Join a room</span>
+            </div>
+            <div class="card-body">
+              <div class="card-heading-row">
+                <div class="card-icon-large secondary"><i class="fa-solid fa-arrow-right-to-bracket"></i></div>
+                <div><h3>Join a meeting</h3><span>Enter your room code</span></div>
+              </div>
+              <div class="form-block">
+                <div class="code-inputs">
+                  <input id="joinLetters" type="text" maxlength="3" placeholder="ABC" autocomplete="off" spellcheck="false" aria-label="Meeting code letters">
+                  <span class="code-sep">—</span>
+                  <input id="joinNumbers" type="text" maxlength="3" placeholder="123" inputmode="numeric" autocomplete="off" aria-label="Meeting code numbers">
+                </div>
+                <input id="joinYourName" type="text" maxlength="40" placeholder="Your name" autocomplete="off" aria-label="Your name">
+                <button id="joinBtn" class="btn primary-btn landing-main-btn">
+                  <span>Join meeting</span><i class="fa-solid fa-arrow-right"></i>
+                </button>
+                <p id="joinError" class="error-msg hidden"></p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="landing-trust-row anim-fade-up" style="--delay:.3s">
+          <div class="trust-item"><strong>01</strong><span>Open a room</span></div>
+          <div class="trust-line"></div>
+          <div class="trust-item"><strong>02</strong><span>Invite your people</span></div>
+          <div class="trust-line"></div>
+          <div class="trust-item"><strong>03</strong><span>Share & collaborate</span></div>
+        </div>
+
+        <section class="landing-benefits anim-fade-up" style="--delay:.35s">
+          <div class="benefit-copy">
+            <span class="section-kicker">BUILT FOR FOCUS</span>
+            <h3>Everything you need to make a meeting feel effortless.</h3>
+            <p>Keep the experience simple: enter a room, see who's there, share your screen, and talk. Your existing meeting tools stay exactly where you expect them.</p>
+          </div>
+          <div class="benefit-grid">
+            <article><span><i class="fa-solid fa-users"></i></span><h4>People, at a glance</h4><p>See who's in the room and who is sharing.</p></article>
+            <article><span><i class="fa-solid fa-desktop"></i></span><h4>Share your screen</h4><p>Present work directly inside the meeting.</p></article>
+            <article><span><i class="fa-solid fa-clock-rotate-left"></i></span><h4>Meeting history</h4><p>Signed-in users can revisit their meeting history.</p></article>
+          </div>
+        </section>
+
+        <div class="landing-bottom-cta anim-fade-up" style="--delay:.4s">
+          <div class="cta-mark"><i class="fa-solid fa-handshake"></i></div>
+          <div><strong>Ready when your team is.</strong><span>Create a room and start the conversation.</span></div>
+          <button class="btn landing-ghost-btn" type="button" onclick="document.getElementById('createName')?.focus()">Start a meeting <i class="fa-solid fa-arrow-right"></i></button>
         </div>
       </div>
     </section>
@@ -221,6 +311,6 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.9.1/dist/livekit-client.umd.min.js"></script>
-  <script src="script.js?v=20260907a"></script>
+  <script src="script.js?v=20260907b"></script>
 </body>
 </html>
