@@ -1519,5 +1519,47 @@
   // Do NOT leave on refresh — session + URL allow seamless rejoin when a name is known.
   // Leave only when the user clicks Leave (or navigates away via back to home).
 
+
+
+  // Landing mock: typewriter messages inside the stage preview
+  function runLandingTypewriter() {
+    const lines = document.querySelectorAll('.hero-stage .type-line[data-text]');
+    if (!lines.length) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      lines.forEach((el) => {
+        el.textContent = el.getAttribute('data-text') || '';
+        el.classList.add('done');
+      });
+      return;
+    }
+
+    const schedule = [400, 1600, 2900]; // when each message starts typing
+    const speed = 28; // ms per character
+
+    lines.forEach((el, i) => {
+      const full = el.getAttribute('data-text') || '';
+      el.textContent = '';
+      const startAt = schedule[i] ?? (400 + i * 1400);
+      setTimeout(() => {
+        el.classList.add('typing');
+        let n = 0;
+        const tick = () => {
+          n += 1;
+          el.textContent = full.slice(0, n);
+          if (n < full.length) {
+            setTimeout(tick, speed);
+          } else {
+            el.classList.remove('typing');
+            el.classList.add('done');
+          }
+        };
+        tick();
+      }, startAt);
+    });
+  }
+
+  // Kick off once DOM is ready (script is at end of body)
+  runLandingTypewriter();
+
   restoreSession().then(() => tryRejoinFromUrl());
 })();

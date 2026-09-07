@@ -934,10 +934,10 @@ body.dark .history-card {
 .stage-screen { position:relative; padding:18px; background:#0f1117; }
 .screen-header { display:flex;justify-content:space-between;color:#c8cad2;font-size:10px;margin-bottom:14px; }
 .screen-header span:last-child { color:#59ce88; }
-.fake-editor { border:1px solid #2b2e38;border-radius:12px;padding:18px;background:#181b23;box-shadow:inset 0 1px 0 rgba(255,255,255,.025); }
-.fake-line { height:7px;border-radius:10px;background:#3b3f4b;margin-bottom:11px;opacity:.8; }.fake-line.wide{width:78%}.fake-line.medium{width:54%}.fake-line.short{width:34%}
-.fake-card { display:flex;gap:8px;padding:10px;margin:18px 0;background:#20232c;border:1px solid #303441;border-radius:10px; }
-.fake-card span { height:54px;flex:1;border-radius:6px;background:linear-gradient(135deg,#343849,#272b35); }
+.my-mock-editor { border:1px solid #2b2e38;border-radius:12px;padding:18px;background:#181b23;box-shadow:inset 0 1px 0 rgba(255,255,255,.025); }
+.my-mock-line { height:7px;border-radius:10px;background:#3b3f4b;margin-bottom:11px;opacity:.8; }.my-mock-line.wide{width:78%}.my-mock-line.medium{width:54%}.my-mock-line.short{width:34%}
+.my-mock-card { display:flex;gap:8px;padding:10px;margin:18px 0;background:#20232c;border:1px solid #303441;border-radius:10px; }
+.my-mock-card span { height:54px;flex:1;border-radius:6px;background:linear-gradient(135deg,#343849,#272b35); }
 .stage-cursor { position:absolute;right:19%;bottom:19%;display:flex;align-items:center;gap:5px;color:#fff;background:#5c5de2;padding:5px 7px;border-radius:5px;font-size:8px;box-shadow:0 8px 20px rgba(0,0,0,.3); }
 .stage-cursor i { font-size:10px; }
 
@@ -1002,105 +1002,200 @@ body.dark .history-card {
 
 
 /* =========================================================
-   Landing polish: real mock thumbs + entrance animations
+   Landing polish: mock thumbs, typing chat, stronger motion
    ========================================================= */
-.fake-card {
+.my-mock-card {
   display: flex;
   gap: 8px;
   padding: 10px;
-  margin: 18px 0;
+  margin: 14px 0 0;
   background: #20232c;
   border: 1px solid #303441;
   border-radius: 10px;
 }
-.fake-card .fake-thumb {
+.my-mock-card .my-mock-thumb {
   flex: 1;
-  height: 54px;
+  height: 56px;
   object-fit: cover;
   border-radius: 6px;
-  border: 1px solid rgba(255,255,255,.08);
+  border: 1px solid rgba(255,255,255,.1);
   background: #272b35;
   display: block;
+  animation: thumb-pop .55s cubic-bezier(.22,1,.36,1) both;
+}
+.my-mock-card .my-mock-thumb:nth-child(1) { animation-delay: 2.4s; }
+.my-mock-card .my-mock-thumb:nth-child(2) { animation-delay: 2.55s; }
+.my-mock-card .my-mock-thumb:nth-child(3) { animation-delay: 2.7s; }
+
+.screen-header .header-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #59ce88 !important;
+  font-weight: 700;
+  letter-spacing: .06em;
 }
 
-/* Subtle continuous life on the stage mock */
+/* Chat thread inside mock */
+.chat-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 4px;
+  min-height: 118px;
+}
+.chat-msg {
+  opacity: 0;
+  transform: translateY(8px);
+  animation: msg-in .4s ease forwards;
+}
+.chat-msg.msg-1 { animation-delay: .35s; }
+.chat-msg.msg-2 { animation-delay: 1.55s; }
+.chat-msg.msg-3 { animation-delay: 2.85s; }
+.chat-who {
+  display: block;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  color: #8f92ff;
+  margin-bottom: 3px;
+}
+.chat-msg.msg-2 .chat-who { color: #6ecf9a; }
+.chat-msg.msg-3 .chat-who { color: #e0a0cb; }
+.type-line {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.45;
+  color: #dfe1e7;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  border-right: 1.5px solid transparent;
+  max-width: 100%;
+}
+.type-line.typing {
+  border-right-color: rgba(255,255,255,.55);
+  animation: caret-blink .7s step-end infinite;
+}
+.type-line.done {
+  border-right-color: transparent;
+  white-space: normal;
+}
+
+@keyframes msg-in {
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes caret-blink {
+  50% { border-right-color: transparent; }
+}
+@keyframes thumb-pop {
+  from { opacity: 0; transform: scale(.86); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* Stronger continuous life on the stage mock */
 .stage-window {
-  animation: stage-float 6s ease-in-out infinite;
+  animation: stage-float 3.2s ease-in-out infinite;
 }
 .stage-glow {
-  animation: glow-breathe 5s ease-in-out infinite;
+  animation: glow-breathe 2.8s ease-in-out infinite;
 }
 .stage-live-dot {
-  animation: live-pulse 1s ease-in-out infinite;
+  animation: live-pulse .85s ease-in-out infinite;
 }
 .stage-cursor {
-  animation: cursor-drift 4.5s ease-in-out infinite;
+  animation: cursor-drift 2.8s ease-in-out infinite;
 }
 .eyebrow-dot {
-  animation: live-pulse 1.6s ease-in-out infinite;
+  animation: live-pulse 1.1s ease-in-out infinite;
 }
 .hero-gradient {
-  background-size: 200% auto;
-  animation: gradient-shift 6s ease infinite;
+  background-size: 220% auto;
+  animation: gradient-shift 3.5s ease infinite;
 }
+.hero-pills span {
+  animation: pill-bob 3s ease-in-out infinite;
+}
+.hero-pills span:nth-child(2) { animation-delay: .4s; }
+.hero-pills span:nth-child(3) { animation-delay: .8s; }
 
 @keyframes stage-float {
-  0%, 100% { transform: rotate(1.2deg) translateY(0); }
-  50% { transform: rotate(0.6deg) translateY(-6px); }
+  0%, 100% { transform: rotate(1.2deg) translateY(0) scale(1); }
+  50% { transform: rotate(-0.8deg) translateY(-14px) scale(1.02); }
 }
 @keyframes glow-breathe {
-  0%, 100% { opacity: .9; transform: scale(1); }
-  50% { opacity: 1; transform: scale(1.05); }
+  0%, 100% { opacity: .75; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.12); }
 }
 @keyframes cursor-drift {
   0%, 100% { transform: translate(0, 0); }
-  50% { transform: translate(-12px, -8px); }
+  25% { transform: translate(-18px, -10px); }
+  50% { transform: translate(-6px, -18px); }
+  75% { transform: translate(-22px, -4px); }
 }
 @keyframes gradient-shift {
   0% { background-position: 0% center; }
   50% { background-position: 100% center; }
   100% { background-position: 0% center; }
 }
+@keyframes pill-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
 
-/* Entrance animations */
-.anim-fade-up {
+/* Noticeable entrance animations */
+.anim-enter {
   opacity: 0;
-  transform: translateY(18px);
-  animation: fade-up .7s cubic-bezier(.22,1,.36,1) forwards;
+  transform: translateY(28px);
+  animation: enter-up .85s cubic-bezier(.22,1,.36,1) forwards;
   animation-delay: var(--delay, 0s);
 }
-.anim-fade-in {
+.anim-enter-scale {
   opacity: 0;
-  animation: fade-in .9s ease forwards;
-  animation-delay: .12s;
+  transform: translateY(20px) scale(.94);
+  animation: enter-scale .95s cubic-bezier(.22,1,.36,1) forwards;
+  animation-delay: var(--delay, 0s);
 }
-@keyframes fade-up {
+@keyframes enter-up {
   to { opacity: 1; transform: translateY(0); }
 }
-@keyframes fade-in {
-  to { opacity: 1; }
+@keyframes enter-scale {
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-/* Benefit cards lift */
+/* Cards + benefits: stronger hover */
+.landing-action-card {
+  transition: transform .28s cubic-bezier(.22,1,.36,1), box-shadow .28s ease, border-color .28s ease !important;
+}
+.landing-action-card:hover {
+  transform: translateY(-10px) !important;
+  border-color: color-mix(in srgb, var(--primary) 45%, var(--border)) !important;
+  box-shadow: 0 28px 60px rgba(92,93,226,.18) !important;
+}
 .benefit-grid article {
-  transition: transform .25s ease, box-shadow .25s ease, border-color .25s ease;
+  transition: transform .28s cubic-bezier(.22,1,.36,1), box-shadow .28s ease, border-color .28s ease;
 }
 .benefit-grid article:hover {
-  transform: translateY(-4px);
-  border-color: color-mix(in srgb, var(--primary) 30%, var(--border));
-  box-shadow: 0 14px 36px rgba(92,93,226,.1);
+  transform: translateY(-8px);
+  border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
+  box-shadow: 0 18px 42px rgba(92,93,226,.14);
 }
-
-/* Trust row subtle pop */
 .trust-item strong {
-  transition: transform .2s ease;
+  transition: transform .25s ease, color .25s ease;
 }
 .landing-trust-row:hover .trust-item strong {
-  transform: scale(1.08);
+  transform: scale(1.15);
+}
+
+/* Mobile: keep stage still but keep typing */
+@media (max-width: 900px) {
+  .stage-window { animation: none !important; transform: none !important; }
 }
 
 /* Respect reduced motion */
 @media (prefers-reduced-motion: reduce) {
+  .anim-enter,
+  .anim-enter-scale,
   .anim-fade-up,
   .anim-fade-in,
   .stage-window,
@@ -1108,9 +1203,15 @@ body.dark .history-card {
   .stage-cursor,
   .hero-gradient,
   .eyebrow-dot,
-  .stage-live-dot {
+  .stage-live-dot,
+  .hero-pills span,
+  .my-mock-card .my-mock-thumb,
+  .chat-msg,
+  .type-line.typing {
     animation: none !important;
     opacity: 1 !important;
     transform: none !important;
+    border-right-color: transparent !important;
   }
+  .type-line::after { content: none !important; }
 }
