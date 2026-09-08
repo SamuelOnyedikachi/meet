@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link rel="stylesheet" href="styles.css?v=20260907c">
+  <link rel="stylesheet" href="styles.css?v=20260908m">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤝</text></svg>">
 </head>
 <body>
@@ -29,21 +29,46 @@
         </div>
         <div id="userArea" class="user-area hidden">
           <span id="userLabel" class="user-label"></span>
-          <button id="historyBtn" class="btn icon-btn" title="Meeting history">
+          <button id="historyBtn" class="btn icon-btn desktop-only" title="Meeting history">
             <i class="fa-solid fa-clock-rotate-left"></i>
           </button>
-          <button id="logoutBtn" class="btn small-btn" title="Log out">Log out</button>
+          <button id="logoutBtn" class="btn small-btn desktop-only" title="Log out">Log out</button>
         </div>
         <button id="leaveBtn" class="btn leave-btn hidden" title="Leave meeting">
           <i class="fa-solid fa-right-from-bracket"></i>
-          <span>Leave</span>
+          <span class="leave-label">Leave</span>
         </button>
-        <button id="themeToggle" class="btn icon-btn" title="Toggle day / night">
+        <button id="themeToggle" class="btn icon-btn desktop-only" title="Toggle day / night">
           <i class="fa-solid fa-moon"></i>
         </button>
-        <button id="fullscreenBtn" class="btn icon-btn" title="Toggle app fullscreen">
+        <button id="fullscreenBtn" class="btn icon-btn desktop-only" title="Toggle app fullscreen">
           <i class="fa-solid fa-expand"></i>
         </button>
+        <div class="more-menu-wrap mobile-only">
+          <button id="moreMenuBtn" class="btn icon-btn" title="More" aria-haspopup="true" aria-expanded="false">
+            <i class="fa-solid fa-ellipsis-vertical"></i>
+          </button>
+          <div id="moreMenu" class="more-menu hidden" role="menu">
+            <button type="button" class="more-item" data-action="theme" role="menuitem">
+              <i class="fa-solid fa-moon"></i> Theme
+            </button>
+            <button type="button" class="more-item" data-action="fullscreen" role="menuitem">
+              <i class="fa-solid fa-expand"></i> Fullscreen
+            </button>
+            <button type="button" class="more-item more-history hidden" data-action="history" role="menuitem">
+              <i class="fa-solid fa-clock-rotate-left"></i> History
+            </button>
+            <button type="button" class="more-item more-logout hidden" data-action="logout" role="menuitem">
+              <i class="fa-solid fa-right-from-bracket"></i> Log out
+            </button>
+            <button type="button" class="more-item more-login" data-action="login" role="menuitem">
+              <i class="fa-solid fa-right-to-bracket"></i> Log in
+            </button>
+            <button type="button" class="more-item more-signup" data-action="signup" role="menuitem">
+              <i class="fa-solid fa-user-plus"></i> Sign up
+            </button>
+          </div>
+        </div>
       </div>
     </header>
 
@@ -221,7 +246,7 @@
     <!-- MEETING -->
     <main id="meetingView" class="layout hidden">
       <section class="col col-1" id="col1">
-        <div class="panel">
+        <div class="panel people-panel">
           <h2>
             <i class="fa-solid fa-users"></i>
             People
@@ -323,6 +348,6 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.9.1/dist/livekit-client.umd.min.js"></script>
-  <script src="script.js?v=20260907c"></script>
+  <script src="script.js?v=20260908m"></script>
 </body>
 </html>

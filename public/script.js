@@ -216,6 +216,13 @@
       authArea?.classList.remove('hidden');
       userArea?.classList.add('hidden');
     }
+    // Keep mobile overflow menu in sync
+    document.querySelectorAll('.more-history, .more-logout').forEach((el) => {
+      el.classList.toggle('hidden', !currentUser);
+    });
+    document.querySelectorAll('.more-login, .more-signup').forEach((el) => {
+      el.classList.toggle('hidden', !!currentUser);
+    });
   }
 
   function openAuthModal(tab) {
@@ -272,6 +279,36 @@
   authModalBackdrop?.addEventListener('click', closeAuthModal);
   tabLogin?.addEventListener('click', () => openAuthModal('login'));
   tabSignup?.addEventListener('click', () => openAuthModal('signup'));
+
+  // Mobile overflow menu (theme / fullscreen / auth)
+  const moreMenuBtn = $('moreMenuBtn');
+  const moreMenu = $('moreMenu');
+  function closeMoreMenu() {
+    moreMenu?.classList.add('hidden');
+    moreMenuBtn?.setAttribute('aria-expanded', 'false');
+  }
+  moreMenuBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const open = moreMenu?.classList.toggle('hidden') === false;
+    moreMenuBtn.setAttribute('aria-expanded', String(open));
+  });
+  document.addEventListener('click', (e) => {
+    if (!moreMenu || moreMenu.classList.contains('hidden')) return;
+    if (moreMenu.contains(e.target) || moreMenuBtn?.contains(e.target)) return;
+    closeMoreMenu();
+  });
+  moreMenu?.addEventListener('click', (e) => {
+    const item = e.target.closest('.more-item');
+    if (!item) return;
+    const action = item.dataset.action;
+    closeMoreMenu();
+    if (action === 'theme') themeToggle?.click();
+    else if (action === 'fullscreen') fullscreenBtn?.click();
+    else if (action === 'history') historyBtn?.click();
+    else if (action === 'logout') logoutBtn?.click();
+    else if (action === 'login') openAuthModal('login');
+    else if (action === 'signup') openAuthModal('signup');
+  });
 
   loginForm?.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -1130,36 +1167,114 @@
     if (!participantList) return;
     participantList.innerHTML = '';
     if (participantCount) participantCount.textContent = String(participants.length);
-    participants.forEach((p) => {
+
+    // Prefer host first, then self, then others — show 2 pinned, rest collapsible
+    const sorted = [...participants].sort((a, b) => {
+      if (a.isHost && !b.isHost) return -1;
+      if (!a.isHost && b.isHost) return 1;
+      if (a.id === currentMeeting?.participantId) return -1;
+      if (b.id === currentMeeting?.participantId) return 1;
+      return 0;
+    });
+
+    const VISIBLE = 2;
+    const pinned = sorted.slice(0, VISIBLE);
+    const rest = sorted.slice(VISIBLE);
+
+    const appendItem = (p, parent) => {
       const li = document.createElement('li');
       li.className = 'participant-item';
       if (p.isHost) li.classList.add('host');
       if (p.id === currentMeeting?.participantId) li.classList.add('me');
       li.innerHTML = `
         <span class="p-name">${escapeHtml(p.name)}${p.isHost ? ' <span class="host-tag">Host</span>' : ''}${p.id === currentMeeting?.participantId ? ' <span class="me-tag">(you)</span>' : ''}</span>
-        ${p.sharing ? '<span class="live-dot" title="Sharing screen"></span>' : ''}
+        ${p.sharing ? '<span class="live-dot" title="Sharing screen" aria-label="Sharing"></span>' : ''}
       `;
-      participantList.appendChild(li);
-    });
+      parent.appendChild(li);
+    };
+
+    pinned.forEach((p) => appendItem(p, participantList));
+
+    if (rest.length) {
+      const wrap = document.createElement('li');
+      wrap.className = 'participant-collapse';
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'collapse-toggle';
+      toggle.setAttribute('aria-expanded', 'false');
+      toggle.innerHTML = `<i class="fa-solid fa-chevron-down"></i> <span>${rest.length} more</span>`;
+      const sub = document.createElement('ul');
+      sub.className = 'participant-list nested collapsed';
+      rest.forEach((p) => appendItem(p, sub));
+      toggle.addEventListener('click', () => {
+        const open = sub.classList.toggle('collapsed') === false;
+        toggle.setAttribute('aria-expanded', String(open));
+        toggle.querySelector('span').textContent = open ? 'Show less' : `${rest.length} more`;
+        toggle.querySelector('i')?.classList.toggle('rotated', open);
+      });
+      wrap.appendChild(toggle);
+      wrap.appendChild(sub);
+      participantList.appendChild(wrap);
+    }
   }
 
   function renderCards() {
     if (!screenCards) return;
     screenCards.innerHTML = '';
-    participants.forEach((p) => {
-      const sharing = p.sharing || (p.id === currentMeeting?.participantId && isSharing);
+
+    // Only cards for people currently sharing (easy switch between live screens)
+    const sharingList = participants.filter(
+      (p) => p.sharing || (p.id === currentMeeting?.participantId && isSharing)
+    );
+
+    if (!sharingList.length) {
+      screenCards.classList.add('empty');
+      return;
+    }
+    screenCards.classList.remove('empty');
+
+    const CARD_VISIBLE = 4; // one compact row; rest collapsible on small screens
+    const pinned = sharingList.slice(0, CARD_VISIBLE);
+    const rest = sharingList.slice(CARD_VISIBLE);
+
+    const makeCard = (p) => {
       const card = document.createElement('div');
-      card.className = 'screen-card';
-      if (sharing) card.classList.add('sharing');
+      card.className = 'screen-card sharing';
       if (watchingId === p.id) card.classList.add('watching', 'active');
       card.innerHTML = `
-        <i class="fa-solid fa-desktop card-icon"></i>
+        <i class="fa-solid fa-desktop card-icon" title="Sharing screen"></i>
         <span class="card-name">${escapeHtml(p.name)}</span>
-        <span class="card-status">${sharing ? 'LIVE' : ''}</span>
       `;
       card.addEventListener('click', () => onCardClick(p));
-      screenCards.appendChild(card);
-    });
+      return card;
+    };
+
+    const row = document.createElement('div');
+    row.className = 'screen-cards-row';
+    pinned.forEach((p) => row.appendChild(makeCard(p)));
+    screenCards.appendChild(row);
+
+    if (rest.length) {
+      const wrap = document.createElement('div');
+      wrap.className = 'screen-cards-collapse';
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'collapse-toggle cards-toggle';
+      toggle.setAttribute('aria-expanded', 'false');
+      toggle.innerHTML = `<i class="fa-solid fa-chevron-down"></i> <span>${rest.length} more screens</span>`;
+      const extra = document.createElement('div');
+      extra.className = 'screen-cards-row nested collapsed';
+      rest.forEach((p) => extra.appendChild(makeCard(p)));
+      toggle.addEventListener('click', () => {
+        const open = extra.classList.toggle('collapsed') === false;
+        toggle.setAttribute('aria-expanded', String(open));
+        toggle.querySelector('span').textContent = open ? 'Show less' : `${rest.length} more screens`;
+        toggle.querySelector('i')?.classList.toggle('rotated', open);
+      });
+      wrap.appendChild(toggle);
+      wrap.appendChild(extra);
+      screenCards.appendChild(wrap);
+    }
   }
 
   async function onCardClick(p) {
