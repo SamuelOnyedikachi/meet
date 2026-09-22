@@ -749,6 +749,7 @@ const server = http.createServer(async (req, res) => {
         lastActivity: now,
         participants,
         content: null,
+        chatHistory: [],
         scheduledId: body.scheduledId || null,
       });
 
@@ -1081,6 +1082,7 @@ wss.on('connection', (ws, req) => {
       const meeting = meetings.get(meetingCode);
       if (meeting) {
         meeting.lastActivity = Date.now();
+        if (!Array.isArray(meeting.chatHistory)) meeting.chatHistory = [];
         ws.send(JSON.stringify({
           type: 'participants',
           participants: getParticipantsList(meeting),
@@ -1089,6 +1091,13 @@ wss.on('connection', (ws, req) => {
           type: 'content-state',
           content: getContentState(meeting),
         }));
+        // Catch-up chat for late joiners (last 100 messages)
+        if (meeting.chatHistory.length) {
+          ws.send(JSON.stringify({
+            type: 'chat-history',
+            messages: meeting.chatHistory.slice(-100),
+          }));
+        }
       }
       return;
     }
@@ -1130,14 +1139,20 @@ wss.on('connection', (ws, req) => {
       if (!p) return;
       const text = String(msg.text || '').trim().slice(0, 500);
       if (!text) return;
-      broadcast(meetingCode, {
+      const chatMsg = {
         type: 'chat',
         id: Date.now() + '-' + Math.random().toString(36).slice(2, 7),
         participantId,
         name: p.name,
         text,
         at: Date.now(),
-      });
+      };
+      if (!Array.isArray(meeting.chatHistory)) meeting.chatHistory = [];
+      meeting.chatHistory.push(chatMsg);
+      if (meeting.chatHistory.length > 200) {
+        meeting.chatHistory = meeting.chatHistory.slice(-150);
+      }
+      broadcast(meetingCode, chatMsg);
       return;
     }
 

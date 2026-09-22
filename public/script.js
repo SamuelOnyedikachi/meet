@@ -598,6 +598,12 @@
         appendChatMessage(msg);
         return;
       }
+      if (msg.type === 'chat-history') {
+        var box = $('chatMessages');
+        if (box) box.innerHTML = '';
+        (msg.messages || []).forEach(function (m) { appendChatMessage(m); });
+        return;
+      }
       if (msg.type === 'reaction') {
         showReaction(msg);
         return;
@@ -838,40 +844,37 @@
     const identity = participant.identity;
     if (!remoteMedia[identity]) remoteMedia[identity] = {};
 
-    if (track.kind === LK.Track.Kind.Video && publication.source === LK.Track.Source.ScreenShare) {
-      remoteMedia[identity].screenTrack = track;
-      console.log('[LiveKit] ScreenShare TrackSubscribed', {
-        identity,
-        trackSid: track.sid,
-        muted: track.isMuted,
-        streamState: track.streamState,
-        dimensions: track.dimensions,
-        mediaStreamTrack: track.mediaStreamTrack
-          ? {
-              id: track.mediaStreamTrack.id,
-              readyState: track.mediaStreamTrack.readyState,
-              enabled: track.mediaStreamTrack.enabled,
-              muted: track.mediaStreamTrack.muted,
-              label: track.mediaStreamTrack.label,
-            }
-          : null,
-      });
-      // Request highest available quality for screen content
-      try {
-        if (publication.setVideoQuality && LK.VideoQuality) {
-          publication.setVideoQuality(LK.VideoQuality.HIGH);
+    // Screen share OR local-movie (published as camera/unknown video)
+    if (track.kind === LK.Track.Kind.Video) {
+      const isScreen = publication.source === LK.Track.Source.ScreenShare;
+      const isMovie = !isScreen && (
+        (publication.trackName && /movie|local-movie|content/i.test(publication.trackName)) ||
+        publication.source === LK.Track.Source.Unknown ||
+        publication.source === LK.Track.Source.Camera
+      );
+      if (isScreen || isMovie) {
+        remoteMedia[identity].screenTrack = track;
+        console.log('[LiveKit] Video TrackSubscribed', {
+          identity,
+          source: publication.source,
+          name: publication.trackName,
+          trackSid: track.sid,
+        });
+        try {
+          if (publication.setVideoQuality && LK.VideoQuality) {
+            publication.setVideoQuality(LK.VideoQuality.HIGH);
+          }
+          if (typeof publication.setSubscribed === 'function' && !publication.isSubscribed) {
+            publication.setSubscribed(true);
+          }
+        } catch (_) {}
+        const p = participants.find(x => x.id === identity);
+        if (p && !p.sharing) { p.sharing = true; renderCards(); }
+        if (!watchingId || watchingId === identity) {
+          watchingId = identity;
+          attachScreenToBigView(track, identity);
+          renderCards();
         }
-        if (typeof publication.setSubscribed === 'function' && !publication.isSubscribed) {
-          publication.setSubscribed(true);
-        }
-      } catch (_) {}
-      const p = participants.find(x => x.id === identity);
-      if (p && !p.sharing) { p.sharing = true; renderCards(); }
-      // Auto-watch if nothing is currently selected, or if we were already waiting for this person
-      if (!watchingId || watchingId === identity) {
-        watchingId = identity;
-        attachScreenToBigView(track, identity);
-        renderCards();
       }
     }
 
@@ -1866,6 +1869,21 @@
       closeContentModal();
       return;
     }
+    if ((file.type && file.type.indexOf('image/') === 0) || /\.(png|jpe?g|gif|webp|svg)$/i.test(file.name)) {
+      var ireader = new FileReader();
+      ireader.onload = function () {
+        sendWS({
+          type: 'content-start',
+          contentType: 'image',
+          title: title || file.name,
+          scrollMode: uniform ? 'uniform' : 'free',
+          fileMeta: { name: file.name, size: file.size, mime: file.type || 'image/*', dataUrl: ireader.result }
+        });
+        closeContentModal();
+      };
+      ireader.readAsDataURL(file);
+      return;
+    }
     var reader = new FileReader();
     reader.onload = function () {
       var dataUrl = reader.result;
@@ -1896,10 +1914,19 @@
         var stream = vid.captureStream();
         var vTrack = stream.getVideoTracks()[0];
         if (vTrack) {
-          await room.localParticipant.publishTrack(vTrack, { name: 'local-movie', source: LK.Track.Source.Unknown });
+          // Publish as ScreenShare so existing subscribers attach it to the main stage
+          await room.localParticipant.publishTrack(vTrack, {
+            name: 'local-movie',
+            source: LK.Track.Source.ScreenShare,
+          });
           isSharing = true;
           if (typeof updateShareButton === 'function') updateShareButton();
           sendWS({ type: 'start-share' });
+          // Owner also sees local element; others get the LiveKit track
+          if (typeof watchParticipant === 'function' && currentMeeting) {
+            watchingId = null;
+            watchParticipant(currentMeeting.participantId);
+          }
         }
       }
     } catch (e) { console.warn('local video publish', e); }
@@ -1948,6 +1975,8 @@
     canvas.width = viewport.width;
     canvas.height = viewport.height;
     await page.render({ canvasContext: canvas.getContext('2d'), viewport: viewport }).promise;
+    var pdfLabel = $('pdfPageLabel');
+    if (pdfLabel && pdfDoc) pdfLabel.textContent = pdfPageNum + ' / ' + pdfDoc.numPages;
   }
 
   function applyContentState(content) {
@@ -1964,21 +1993,63 @@
     if (placeholder) placeholder.classList.add('hidden');
     if (remoteVideo) remoteVideo.style.opacity = '0';
     var frame = $('contentFrame');
+    var fallback = $('contentFrameFallback');
     var pdfWrap = $('pdfCanvasWrap');
     var localVid = $('localMediaVideo');
+    var imgEl = $('contentImage');
     if (frame) frame.classList.add('hidden');
+    if (fallback) fallback.classList.add('hidden');
     if (pdfWrap) pdfWrap.classList.add('hidden');
+    if (imgEl) imgEl.classList.add('hidden');
     if (localVid && content.type !== 'local-video') localVid.classList.add('hidden');
-    if (content.type === 'url' && content.url && frame) {
-      frame.classList.remove('hidden');
-      if (frame.src !== content.url) frame.src = content.url;
+
+    if (content.type === 'url' && content.url) {
+      if (frame) {
+        frame.classList.remove('hidden');
+        // Detect blocked embeds after load
+        frame.onload = function () {
+          try {
+            // Same-origin only; cross-origin throws — treat empty as possible block
+            var doc = frame.contentDocument;
+            if (doc && (!doc.body || !doc.body.innerHTML)) showUrlFallback(content.url);
+          } catch (e) {
+            // Cross-origin: cannot inspect; many sites still refuse and show blank
+            setTimeout(function () {
+              // Heuristic: if still about:blank-ish user will use fallback button
+            }, 800);
+          }
+        };
+        if (frame.src !== content.url) frame.src = content.url;
+      }
+      var ext = $('contentOpenExternal');
+      if (ext) ext.href = content.url;
+      // Always offer external open in toolbar context via fallback toggle button
     } else if (content.type === 'pdf') {
       if (pdfWrap) pdfWrap.classList.remove('hidden');
       if (content.page && content.page !== pdfPageNum && pdfDoc) renderPdfPage(content.page);
+    } else if (content.type === 'image' || (content.type === 'file' && content.fileMeta && /^image\//.test(content.fileMeta.mime || ''))) {
+      if (imgEl && content.fileMeta && content.fileMeta.dataUrl) {
+        imgEl.src = content.fileMeta.dataUrl;
+        imgEl.classList.remove('hidden');
+      }
     } else if (content.type === 'local-video') {
-      if (content.ownerId === currentMeeting?.participantId && localVid) localVid.classList.remove('hidden');
+      // Owner: local element with controls. Others: LiveKit screen track on big view.
+      if (content.ownerId === (currentMeeting && currentMeeting.participantId) && localVid) {
+        localVid.classList.remove('hidden');
+      }
+    } else if (content.type === 'file') {
+      // Downloadable only — show fallback message in toolbar title
     }
     updateContentToolbar();
+  }
+
+  function showUrlFallback(url) {
+    var frame = $('contentFrame');
+    var fallback = $('contentFrameFallback');
+    if (frame) frame.classList.add('hidden');
+    if (fallback) fallback.classList.remove('hidden');
+    var ext = $('contentOpenExternal');
+    if (ext && url) ext.href = url;
   }
 
   function applyContentUpdate(content, from) {
@@ -2028,6 +2099,17 @@
     var isHost = !!(participants.find(function (p) { return p.id === myId; }) || {}).isHost;
     if (stopBtn) stopBtn.classList.toggle('hidden', !(isOwner || isHost));
     if (dlBtn) dlBtn.classList.toggle('hidden', !(c.fileMeta && c.type !== 'local-video'));
+    var isPdf = c.type === 'pdf';
+    var pdfPrev = $('pdfPrevBtn');
+    var pdfNext = $('pdfNextBtn');
+    var pdfLabel = $('pdfPageLabel');
+    if (pdfPrev) pdfPrev.classList.toggle('hidden', !isPdf);
+    if (pdfNext) pdfNext.classList.toggle('hidden', !isPdf);
+    if (pdfLabel) {
+      pdfLabel.classList.toggle('hidden', !isPdf);
+      if (isPdf && pdfDoc) pdfLabel.textContent = pdfPageNum + ' / ' + pdfDoc.numPages;
+      else if (isPdf) pdfLabel.textContent = (c.page || 1) + '';
+    }
   }
 
   if ($('claimRemoteBtn')) $('claimRemoteBtn').addEventListener('click', function () { sendWS({ type: 'remote-claim' }); });
@@ -2238,6 +2320,38 @@
     if (!vid) return;
     sendWS({ type: 'content-update', media: { currentTime: vid.currentTime, playing: !vid.paused } });
   });
+
+  function pdfGo(delta) {
+    if (!currentContent || currentContent.type !== 'pdf') return;
+    var myId = currentMeeting && currentMeeting.participantId;
+    var canControl = currentContent.remoteHolderId === myId || currentContent.ownerId === myId;
+    if (!canControl && currentContent.scrollMode === 'uniform') return;
+    var next = (pdfPageNum || 1) + delta;
+    if (pdfDoc) next = Math.max(1, Math.min(next, pdfDoc.numPages));
+    renderPdfPage(next);
+    if (canControl) sendWS({ type: 'content-update', page: next });
+  }
+  if ($('pdfPrevBtn')) $('pdfPrevBtn').addEventListener('click', function () { pdfGo(-1); });
+  if ($('pdfNextBtn')) $('pdfNextBtn').addEventListener('click', function () { pdfGo(1); });
+  document.addEventListener('keydown', function (e) {
+    if (!currentContent) return;
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+    if (currentContent.type === 'pdf') {
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === 'PageDown') { e.preventDefault(); pdfGo(1); }
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowUp' || e.key === 'PageUp') { e.preventDefault(); pdfGo(-1); }
+    }
+  });
+  // Manual "site blocked" helper: double-click iframe area opens fallback
+  if ($('contentFrame')) {
+    $('contentFrame').addEventListener('load', function () {
+      // After short delay, if URL share and user reports blank, they can use Open in new tab
+      var c = currentContent;
+      if (c && c.type === 'url' && c.url) {
+        var ext = $('contentOpenExternal');
+        if (ext) ext.href = c.url;
+      }
+    });
+  }
 
   restoreSession().then(function () { tryRejoinFromUrl(); });
 })();

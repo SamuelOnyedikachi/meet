@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link rel="stylesheet" href="styles.css?v=20260922a">
+  <link rel="stylesheet" href="styles.css?v=20260922b">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤝</text></svg>">
 </head>
 <body>
@@ -309,10 +309,17 @@
             <div class="big-view" id="bigView">
               <video id="remoteVideo" autoplay playsinline></video>
               <div id="contentView" class="content-view hidden">
-                <iframe id="contentFrame" class="content-frame" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" title="Shared content"></iframe>
+                <iframe id="contentFrame" class="content-frame" sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" title="Shared content"></iframe>
+                <div id="contentFrameFallback" class="content-frame-fallback hidden">
+                  <i class="fa-solid fa-ban"></i>
+                  <p><strong>This site blocks embedding</strong> (X-Frame-Options / CSP).</p>
+                  <p class="sub">Open it in a new tab and use <strong>Share screen</strong> so others can see it.</p>
+                  <a id="contentOpenExternal" class="btn primary-btn" href="#" target="_blank" rel="noopener">Open URL in new tab</a>
+                </div>
                 <div id="pdfCanvasWrap" class="pdf-canvas-wrap hidden">
                   <canvas id="pdfCanvas"></canvas>
                 </div>
+                <img id="contentImage" class="content-image hidden" alt="Shared image">
                 <video id="localMediaVideo" class="local-media-video hidden" playsinline controls></video>
                 <div id="contentToolbar" class="content-toolbar">
                   <span id="contentTitle" class="content-title"></span>
@@ -322,6 +329,13 @@
                   </button>
                   <button type="button" id="handoffRemoteBtn" class="btn small-btn hidden" title="Hand remote to someone">
                     <i class="fa-solid fa-share-nodes"></i> Hand remote
+                  </button>
+                  <button type="button" id="pdfPrevBtn" class="btn small-btn hidden" title="Previous page">
+                    <i class="fa-solid fa-chevron-left"></i>
+                  </button>
+                  <span id="pdfPageLabel" class="pdf-page-label hidden">1 / 1</span>
+                  <button type="button" id="pdfNextBtn" class="btn small-btn hidden" title="Next page">
+                    <i class="fa-solid fa-chevron-right"></i>
                   </button>
                   <select id="scrollModeSelect" class="scroll-mode-select hidden" title="Scroll mode">
                     <option value="uniform">Uniform scroll</option>
@@ -482,6 +496,6 @@
       return m;
     }).catch(() => null);
   </script>
-  <script src="script.js?v=20260922a"></script>
+  <script src="script.js?v=20260922b"></script>
 </body>
 </html>
