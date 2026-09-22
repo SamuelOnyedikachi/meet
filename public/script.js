@@ -844,37 +844,30 @@
     const identity = participant.identity;
     if (!remoteMedia[identity]) remoteMedia[identity] = {};
 
-    // Screen share OR local-movie (published as camera/unknown video)
-    if (track.kind === LK.Track.Kind.Video) {
-      const isScreen = publication.source === LK.Track.Source.ScreenShare;
-      const isMovie = !isScreen && (
-        (publication.trackName && /movie|local-movie|content/i.test(publication.trackName)) ||
-        publication.source === LK.Track.Source.Unknown ||
-        publication.source === LK.Track.Source.Camera
-      );
-      if (isScreen || isMovie) {
-        remoteMedia[identity].screenTrack = track;
-        console.log('[LiveKit] Video TrackSubscribed', {
-          identity,
-          source: publication.source,
-          name: publication.trackName,
-          trackSid: track.sid,
-        });
-        try {
-          if (publication.setVideoQuality && LK.VideoQuality) {
-            publication.setVideoQuality(LK.VideoQuality.HIGH);
-          }
-          if (typeof publication.setSubscribed === 'function' && !publication.isSubscribed) {
-            publication.setSubscribed(true);
-          }
-        } catch (_) {}
-        const p = participants.find(x => x.id === identity);
-        if (p && !p.sharing) { p.sharing = true; renderCards(); }
-        if (!watchingId || watchingId === identity) {
-          watchingId = identity;
-          attachScreenToBigView(track, identity);
-          renderCards();
+    if (track.kind === LK.Track.Kind.Video && publication.source === LK.Track.Source.ScreenShare) {
+      remoteMedia[identity].screenTrack = track;
+      console.log('[LiveKit] ScreenShare TrackSubscribed', {
+        identity,
+        trackSid: track.sid,
+        muted: track.isMuted,
+        streamState: track.streamState,
+        dimensions: track.dimensions,
+      });
+      try {
+        if (publication.setVideoQuality && LK.VideoQuality) {
+          publication.setVideoQuality(LK.VideoQuality.HIGH);
         }
+        if (typeof publication.setSubscribed === 'function' && !publication.isSubscribed) {
+          publication.setSubscribed(true);
+        }
+      } catch (_) {}
+      const p = participants.find(x => x.id === identity);
+      if (p && !p.sharing) { p.sharing = true; renderCards(); }
+      // Auto-watch only if nothing selected yet; never steal focus if user picked another card
+      if (!watchingId || watchingId === identity) {
+        watchingId = identity;
+        attachScreenToBigView(track, identity);
+        renderCards();
       }
     }
 
@@ -912,11 +905,23 @@
     delete remoteMedia[identity];
   }
 
+  function hideContentOverlay() {
+    const cv = $('contentView');
+    if (cv) cv.classList.add('hidden');
+    if (remoteVideo) {
+      remoteVideo.style.opacity = '';
+      remoteVideo.style.display = 'none';
+    }
+  }
+
   function attachScreenToBigView(track, identity) {
+    hideContentOverlay();
     const existing = document.getElementById('lkScreenVideo');
     if (existing) {
-      try { track.detach(existing); } catch (_) {}
-      existing.remove();
+      try {
+        // detach any previous track from the element
+        existing.remove();
+      } catch (_) {}
     }
     if (remoteVideo) {
       remoteVideo.style.display = 'none';
@@ -943,7 +948,7 @@
       'object-fit:contain',
       'display:block',
       'background:#0a0c10',
-      'z-index:1',
+      'z-index:3',
     ].join(';');
 
     // Attach MediaStreamTrack(s) to our element
@@ -1020,10 +1025,12 @@
 
   function clearBigView() {
     watchingId = null;
+    try { hideContentOverlay(); } catch (_) {}
     const lkVid = document.getElementById('lkScreenVideo');
     if (lkVid) try { lkVid.remove(); } catch (_) {}
     if (remoteVideo) {
       remoteVideo.style.display = '';
+      remoteVideo.style.opacity = '';
       remoteVideo.srcObject = null;
       remoteVideo.classList.remove('active');
     }
@@ -1154,8 +1161,8 @@
   }
 
   async function watchParticipant(remoteId) {
-    if (watchingId === remoteId) return;
-    // Detach any previous screen video without wiping the new watchingId
+    // Always re-bind so switching cards works even if same id after content overlay
+    hideContentOverlay();
     const prev = document.getElementById('lkScreenVideo');
     if (prev) try { prev.remove(); } catch (_) {}
     if (remoteVideo) {
@@ -1360,12 +1367,10 @@
 
   async function onCardClick(p) {
     if (!currentMeeting) return;
-    // Own card: if already sharing, show own screen in the main view (do not stop sharing).
-    // Start sharing only when not currently sharing.
+    // Own card: if already sharing, show own screen; otherwise start share.
     if (p.id === currentMeeting.participantId) {
       const sharing = isSharing || p.sharing;
       if (sharing) {
-        if (watchingId === p.id) return;
         await watchParticipant(p.id);
         return;
       }
@@ -1373,7 +1378,6 @@
       return;
     }
     if (!p.sharing) return;
-    if (watchingId === p.id) return;
     await watchParticipant(p.id);
   }
 

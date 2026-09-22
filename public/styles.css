@@ -1560,7 +1560,12 @@ body.dark .history-card {
   background: #0a0a0c;
   display: flex;
   flex-direction: column;
+  z-index: 0;
+  pointer-events: none;
+}
+.content-view:not(.hidden) {
   z-index: 2;
+  pointer-events: auto;
 }
 .content-view.hidden { display: none !important; }
 .content-frame {
