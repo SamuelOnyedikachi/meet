@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link rel="stylesheet" href="styles.css?v=20260922a">
+  <link rel="stylesheet" href="styles.css?v=20260908m">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤝</text></svg>">
 </head>
 <body>
@@ -224,41 +224,21 @@
       </div>
     </section>
 
-    <!-- HISTORY + SCHEDULED -->
+    <!-- HISTORY -->
     <section id="historyView" class="history-view hidden">
       <div class="history-card">
         <div class="history-header">
-          <h2><i class="fa-solid fa-clock-rotate-left"></i> Meetings</h2>
+          <h2><i class="fa-solid fa-clock-rotate-left"></i> Meeting history</h2>
           <button id="historyCloseBtn" class="btn small-btn">Back</button>
         </div>
-        <div class="history-tabs">
-          <button type="button" class="history-tab active" data-tab="past">Past</button>
-          <button type="button" class="history-tab" data-tab="scheduled">Scheduled</button>
-        </div>
-        <div id="pastTab" class="history-tab-panel">
-          <p id="historyEmpty" class="history-empty hidden">No meetings yet. Create or join one while logged in.</p>
-          <ul id="historyList" class="history-list"></ul>
-          <div id="historyDetail" class="history-detail hidden">
-            <h3 id="historyDetailTitle"></h3>
-            <p id="historyDetailMeta" class="history-meta"></p>
-            <h4>Participants</h4>
-            <ul id="historyDetailParticipants" class="history-participants"></ul>
-            <button id="historyDetailBack" class="btn small-btn">Back to list</button>
-          </div>
-        </div>
-        <div id="scheduledTab" class="history-tab-panel hidden">
-          <div class="schedule-create">
-            <h3>Schedule a call</h3>
-            <form id="scheduleForm" class="schedule-form">
-              <input id="scheduleName" type="text" maxlength="80" placeholder="Meeting name" required>
-              <input id="scheduleStart" type="datetime-local" required>
-              <input id="scheduleEnd" type="datetime-local" title="Optional end">
-              <button type="submit" class="btn primary-btn">Schedule</button>
-            </form>
-            <p id="scheduleError" class="error-msg hidden"></p>
-          </div>
-          <p id="scheduledEmpty" class="history-empty hidden">No scheduled meetings.</p>
-          <ul id="scheduledList" class="history-list"></ul>
+        <p id="historyEmpty" class="history-empty hidden">No meetings yet. Create or join one while logged in.</p>
+        <ul id="historyList" class="history-list"></ul>
+        <div id="historyDetail" class="history-detail hidden">
+          <h3 id="historyDetailTitle"></h3>
+          <p id="historyDetailMeta" class="history-meta"></p>
+          <h4>Participants</h4>
+          <ul id="historyDetailParticipants" class="history-participants"></ul>
+          <button id="historyDetailBack" class="btn small-btn">Back to list</button>
         </div>
       </div>
     </section>
@@ -271,22 +251,9 @@
             <i class="fa-solid fa-users"></i>
             People
             <span id="participantCount" class="count-badge">1</span>
-            <button id="deviceToggle" class="btn icon-btn device-toggle" title="Show device icons" aria-pressed="true">
-              <i class="fa-solid fa-mobile-screen"></i>
-            </button>
           </h2>
-          <div class="content people-content">
+          <div class="content">
             <ul class="participant-list" id="participantList"></ul>
-            <div class="side-chat" id="sideChat">
-              <div class="chat-header">
-                <i class="fa-regular fa-comments"></i> Chat
-              </div>
-              <div class="chat-messages" id="chatMessages"></div>
-              <form class="chat-form" id="chatForm">
-                <input id="chatInput" type="text" maxlength="500" placeholder="Message…" autocomplete="off">
-                <button type="submit" class="btn icon-btn" title="Send"><i class="fa-solid fa-paper-plane"></i></button>
-              </form>
-            </div>
           </div>
         </div>
       </section>
@@ -296,52 +263,15 @@
       <section class="col col-2" id="col2">
         <div class="panel">
           <div class="content meeting-content">
-            <div class="meeting-title-bar">
-              <span id="meetingNameLabel" class="meeting-name-label"></span>
-              <button id="shareLinkBtn" class="btn small-btn" title="Copy invite link">
-                <i class="fa-solid fa-link"></i> Share
-              </button>
-              <button id="endMeetBtn" class="btn small-btn danger-btn hidden" title="End meeting for everyone">
-                <i class="fa-solid fa-phone-slash"></i> End
-              </button>
-            </div>
             <div class="screen-cards" id="screenCards"></div>
             <div class="big-view" id="bigView">
               <video id="remoteVideo" autoplay playsinline></video>
-              <div id="contentView" class="content-view hidden">
-                <iframe id="contentFrame" class="content-frame" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" title="Shared content"></iframe>
-                <div id="pdfCanvasWrap" class="pdf-canvas-wrap hidden">
-                  <canvas id="pdfCanvas"></canvas>
-                </div>
-                <video id="localMediaVideo" class="local-media-video hidden" playsinline controls></video>
-                <div id="contentToolbar" class="content-toolbar">
-                  <span id="contentTitle" class="content-title"></span>
-                  <span id="remoteBadge" class="remote-badge hidden"><i class="fa-solid fa-gamepad"></i> You have remote</span>
-                  <button type="button" id="claimRemoteBtn" class="btn small-btn hidden" title="Take remote control">
-                    <i class="fa-solid fa-hand"></i> Claim remote
-                  </button>
-                  <button type="button" id="handoffRemoteBtn" class="btn small-btn hidden" title="Hand remote to someone">
-                    <i class="fa-solid fa-share-nodes"></i> Hand remote
-                  </button>
-                  <select id="scrollModeSelect" class="scroll-mode-select hidden" title="Scroll mode">
-                    <option value="uniform">Uniform scroll</option>
-                    <option value="free">Free scroll</option>
-                  </select>
-                  <button type="button" id="downloadContentBtn" class="btn small-btn hidden" title="Download file">
-                    <i class="fa-solid fa-download"></i>
-                  </button>
-                  <button type="button" id="stopContentBtn" class="btn small-btn hidden" title="Stop sharing content">
-                    <i class="fa-solid fa-xmark"></i>
-                  </button>
-                </div>
-              </div>
               <div id="bigPlaceholder" class="placeholder">
                 <i class="fa-solid fa-desktop big-icon"></i>
                 <p>No screen selected</p>
                 <p class="sub">Click a LIVE card to watch, or share your own</p>
               </div>
               <div class="big-view-label" id="bigViewLabel"></div>
-              <div id="reactionOverlay" class="reaction-overlay" aria-hidden="true"></div>
               <button id="screenFsBtn" class="btn icon-btn screen-fs-btn" title="Fullscreen shared screen">
                 <i class="fa-solid fa-expand"></i>
               </button>
@@ -351,29 +281,10 @@
                 <i class="fa-solid fa-desktop"></i>
                 <span>Share screen</span>
               </button>
-              <button id="browseUrlBtn" class="btn call-btn" title="Browse a URL together">
-                <i class="fa-solid fa-globe"></i>
-                <span>URL</span>
-              </button>
-              <button id="shareFileBtn" class="btn call-btn" title="Share PDF / document">
-                <i class="fa-solid fa-file"></i>
-                <span>File</span>
-              </button>
-              <button id="shareVideoBtn" class="btn call-btn" title="Share a local movie (no server cost)">
-                <i class="fa-solid fa-film"></i>
-                <span>Movie</span>
-              </button>
               <button id="micBtn" class="btn call-btn" title="Toggle microphone">
                 <i class="fa-solid fa-microphone"></i>
                 <span>Mic</span>
               </button>
-              <div class="emoji-bar" id="emojiBar">
-                <button type="button" class="emoji-btn" data-emoji="👍" title="Thumbs up">👍</button>
-                <button type="button" class="emoji-btn" data-emoji="👏" title="Clap">👏</button>
-                <button type="button" class="emoji-btn" data-emoji="❤️" title="Heart">❤️</button>
-                <button type="button" class="emoji-btn" data-emoji="😂" title="Laugh">😂</button>
-                <button type="button" class="emoji-btn" data-emoji="🎉" title="Celebrate">🎉</button>
-              </div>
               <div id="liveStatus" class="live-status" aria-live="polite">
                 <span class="live-status-dot"></span>
                 <span id="liveStatusText" class="live-status-text">Connecting…</span>
@@ -383,42 +294,6 @@
         </div>
       </section>
     </main>
-
-    <!-- URL / content modal -->
-    <div id="contentModal" class="modal hidden">
-      <div class="modal-backdrop" id="contentModalBackdrop"></div>
-      <div class="modal-card">
-        <button class="modal-close" id="contentModalClose" title="Close">&times;</button>
-        <h2 id="contentModalTitle">Share content</h2>
-        <form id="contentForm" class="auth-form">
-          <label for="contentUrlInput">URL</label>
-          <input id="contentUrlInput" type="url" placeholder="https://…" autocomplete="url">
-          <label for="contentTitleInput">Display name (optional)</label>
-          <input id="contentTitleInput" type="text" maxlength="80" placeholder="e.g. Product demo">
-          <label class="checkbox-label">
-            <input type="checkbox" id="contentUniformScroll" checked>
-            Uniform scroll (everyone follows one scroller)
-          </label>
-          <button type="submit" class="btn primary-btn full-width">Open in meeting</button>
-          <p id="contentModalError" class="error-msg hidden"></p>
-        </form>
-        <div id="filePickArea" class="file-pick-area hidden">
-          <input type="file" id="fileInput" accept=".pdf,.csv,.xlsx,.xls,.pptx,.ppt,.doc,.docx,image/*,video/*">
-          <p class="hint">PDF, images, and video work best. Office docs can be downloaded by others; convert to PDF for in-call viewing when possible.</p>
-        </div>
-      </div>
-    </div>
-
-    <!-- Hand remote picker -->
-    <div id="handoffModal" class="modal hidden">
-      <div class="modal-backdrop" id="handoffModalBackdrop"></div>
-      <div class="modal-card">
-        <button class="modal-close" id="handoffModalClose" title="Close">&times;</button>
-        <h2>Hand over remote</h2>
-        <p class="hint">Choose who can control the shared page / media.</p>
-        <ul id="handoffList" class="handoff-list"></ul>
-      </div>
-    </div>
 
     <footer class="footer">
       <span>Meet · LiveKit media</span>
@@ -473,15 +348,6 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.9.1/dist/livekit-client.umd.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.mjs" type="module"></script>
-  <script>
-    // pdf.js worker
-    window.pdfjsLibReady = import('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.mjs').then(m => {
-      m.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.worker.min.mjs';
-      window.pdfjsLib = m;
-      return m;
-    }).catch(() => null);
-  </script>
-  <script src="script.js?v=20260922a"></script>
+  <script src="script.js?v=20260908m"></script>
 </body>
 </html>

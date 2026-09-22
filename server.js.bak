@@ -55,13 +55,6 @@ function endMeeting(code, reason = 'ended') {
   if (meeting.historyId) {
     try { db.endMeetingHistory(meeting.historyId); } catch (_) {}
   }
-  if (meeting.scheduledId) {
-    try {
-      db.updateScheduledStatus(meeting.scheduledId, 'ended', {
-        endedAt: new Date().toISOString(),
-      });
-    } catch (_) {}
-  }
   for (const [pid] of meeting.participants) {
     const ws = clients.get(pid);
     if (ws) {
@@ -350,26 +343,7 @@ function getParticipantsList(meeting) {
     isHost: p.isHost,
     sharing: !!p.sharing,
     userId: p.userId || null,
-    device: p.device || 'desktop',
-    mutedByHost: !!p.mutedByHost,
-    online: clients.has(p.id) && clients.get(p.id)?.readyState === 1,
   }));
-}
-
-function getContentState(meeting) {
-  if (!meeting.content) return null;
-  return {
-    type: meeting.content.type,
-    title: meeting.content.title,
-    url: meeting.content.url || null,
-    ownerId: meeting.content.ownerId,
-    remoteHolderId: meeting.content.remoteHolderId,
-    scrollMode: meeting.content.scrollMode || 'uniform',
-    scroll: meeting.content.scroll || null,
-    page: meeting.content.page || null,
-    media: meeting.content.media || null,
-    fileMeta: meeting.content.fileMeta || null,
-  };
 }
 
 function isValidEmail(email) {
@@ -735,8 +709,6 @@ const server = http.createServer(async (req, res) => {
         isHost: true,
         sharing: false,
         userId: authUser ? authUser.id : null,
-        device: body.device || 'desktop',
-        mutedByHost: false,
       });
 
       const now = Date.now();
@@ -748,17 +720,7 @@ const server = http.createServer(async (req, res) => {
         createdAt: now,
         lastActivity: now,
         participants,
-        content: null,
-        scheduledId: body.scheduledId || null,
       });
-
-      if (body.scheduledId) {
-        try {
-          db.updateScheduledStatus(body.scheduledId, 'live', {
-            startedAt: new Date().toISOString(),
-          });
-        } catch (_) {}
-      }
 
       return sendJSON(res, 200, {
         code,
@@ -768,7 +730,6 @@ const server = http.createServer(async (req, res) => {
         hostId,
         participantId: hostId,
         participants: getParticipantsList(meetings.get(code)),
-        content: null,
       });
     } catch (e) {
       console.error('[create]', e);
@@ -818,8 +779,6 @@ const server = http.createServer(async (req, res) => {
           isHost: false,
           sharing: false,
           userId: authUser ? authUser.id : null,
-          device: body.device || 'desktop',
-          mutedByHost: false,
         });
 
         if (meeting.historyId) {
@@ -832,11 +791,9 @@ const server = http.createServer(async (req, res) => {
           db.updateMaxParticipants(meeting.historyId, meeting.participants.size);
         }
       } else {
+        // Rejoin: refresh display name
         const existing = meeting.participants.get(participantId);
-        if (existing) {
-          existing.name = participantName;
-          if (body.device) existing.device = body.device;
-        }
+        if (existing) existing.name = participantName;
       }
 
       meeting.lastActivity = Date.now();
@@ -854,7 +811,6 @@ const server = http.createServer(async (req, res) => {
         name: meeting.name,
         participantId,
         participants: getParticipantsList(meeting),
-        content: getContentState(meeting),
       });
     } catch (e) {
       return sendJSON(res, 400, { error: e.message || 'Bad request' });
@@ -873,107 +829,7 @@ const server = http.createServer(async (req, res) => {
       name: meeting.name,
       participants: getParticipantsList(meeting),
       createdAt: meeting.createdAt,
-      content: getContentState(meeting),
     });
-  }
-
-  // ----- Schedule APIs (logged-in) -----
-  if (urlPath === '/api/schedule' && req.method === 'POST') {
-    try {
-      const authUser = await getAuthUser(req);
-      if (!authUser || !authUser.id) return sendJSON(res, 401, { error: 'Login required to schedule' });
-      const body = await parseBody(req);
-      const name = String(body.name || 'Scheduled meeting').trim().slice(0, 80) || 'Scheduled meeting';
-      const scheduledStart = body.scheduledStart || body.start;
-      if (!scheduledStart) return sendJSON(res, 400, { error: 'scheduledStart required (ISO datetime)' });
-      const startDate = new Date(scheduledStart);
-      if (Number.isNaN(startDate.getTime())) return sendJSON(res, 400, { error: 'Invalid scheduledStart' });
-      let scheduledEnd = body.scheduledEnd || body.end || null;
-      if (scheduledEnd) {
-        const endDate = new Date(scheduledEnd);
-        if (Number.isNaN(endDate.getTime())) scheduledEnd = null;
-        else scheduledEnd = endDate.toISOString();
-      }
-      const code = generateCode();
-      const row = db.createScheduledMeeting({
-        code,
-        name,
-        hostUserId: authUser.id,
-        hostDisplayName: authUser.displayName || authUser.username || null,
-        scheduledStart: startDate.toISOString(),
-        scheduledEnd,
-      });
-      return sendJSON(res, 201, {
-        id: row.id,
-        code: row.code,
-        name: row.name,
-        scheduledStart: row.scheduled_start,
-        scheduledEnd: row.scheduled_end,
-        status: row.status,
-        link: `/${row.code.slice(0, 3)}-${row.code.slice(3)}`,
-      });
-    } catch (e) {
-      console.error('[schedule]', e);
-      return sendJSON(res, 400, { error: e.message || 'Bad request' });
-    }
-  }
-
-  if (urlPath === '/api/schedule' && req.method === 'GET') {
-    try {
-      const authUser = await getAuthUser(req);
-      if (!authUser || !authUser.id) return sendJSON(res, 401, { error: 'Login required' });
-      const rows = db.getScheduledForUser(authUser.id, 50);
-      return sendJSON(res, 200, {
-        meetings: rows.map((r) => ({
-          id: r.id,
-          code: r.code,
-          name: r.name,
-          scheduledStart: r.scheduled_start,
-          scheduledEnd: r.scheduled_end,
-          status: r.status,
-          createdAt: r.created_at,
-          startedAt: r.started_at,
-          endedAt: r.ended_at,
-          link: `/${r.code.slice(0, 3)}-${r.code.slice(3)}`,
-          isLive: meetings.has(r.code),
-        })),
-      });
-    } catch (e) {
-      return sendJSON(res, 500, { error: e.message || 'Failed' });
-    }
-  }
-
-  if (urlPath.startsWith('/api/schedule/') && req.method === 'DELETE') {
-    try {
-      const authUser = await getAuthUser(req);
-      if (!authUser || !authUser.id) return sendJSON(res, 401, { error: 'Login required' });
-      const id = parseInt(urlPath.split('/').pop(), 10);
-      if (!id) return sendJSON(res, 400, { error: 'Invalid id' });
-      db.deleteScheduled(id, authUser.id);
-      return sendJSON(res, 200, { ok: true });
-    } catch (e) {
-      return sendJSON(res, 400, { error: e.message || 'Bad request' });
-    }
-  }
-
-  if (urlPath === '/api/schedule/start' && req.method === 'POST') {
-    try {
-      const authUser = await getAuthUser(req);
-      if (!authUser || !authUser.id) return sendJSON(res, 401, { error: 'Login required' });
-      const body = await parseBody(req);
-      const id = body.id;
-      const row = db.getScheduledById(id);
-      if (!row || row.host_user_id !== authUser.id) {
-        return sendJSON(res, 404, { error: 'Scheduled meeting not found' });
-      }
-      return sendJSON(res, 200, {
-        code: row.code,
-        name: row.name,
-        scheduledId: row.id,
-      });
-    } catch (e) {
-      return sendJSON(res, 400, { error: e.message || 'Bad request' });
-    }
   }
 
   if (urlPath === '/api/leave' && req.method === 'POST') {
@@ -1085,10 +941,6 @@ wss.on('connection', (ws, req) => {
           type: 'participants',
           participants: getParticipantsList(meeting),
         }));
-        ws.send(JSON.stringify({
-          type: 'content-state',
-          content: getContentState(meeting),
-        }));
       }
       return;
     }
@@ -1123,206 +975,11 @@ wss.on('connection', (ws, req) => {
       }
       return;
     }
-
-    // Chat message
-    if (msg.type === 'chat') {
-      const p = meeting.participants.get(participantId);
-      if (!p) return;
-      const text = String(msg.text || '').trim().slice(0, 500);
-      if (!text) return;
-      broadcast(meetingCode, {
-        type: 'chat',
-        id: Date.now() + '-' + Math.random().toString(36).slice(2, 7),
-        participantId,
-        name: p.name,
-        text,
-        at: Date.now(),
-      });
-      return;
-    }
-
-    // Emoji reaction
-    if (msg.type === 'reaction') {
-      const p = meeting.participants.get(participantId);
-      if (!p) return;
-      const emoji = String(msg.emoji || '').slice(0, 8);
-      if (!emoji) return;
-      broadcast(meetingCode, {
-        type: 'reaction',
-        participantId,
-        name: p.name,
-        emoji,
-        at: Date.now(),
-      });
-      return;
-    }
-
-    // Device type update
-    if (msg.type === 'device') {
-      const p = meeting.participants.get(participantId);
-      if (p) {
-        p.device = ['mobile', 'tablet', 'desktop'].includes(msg.device) ? msg.device : 'desktop';
-        broadcast(meetingCode, {
-          type: 'participants',
-          participants: getParticipantsList(meeting),
-        });
-      }
-      return;
-    }
-
-    // Mute another participant's mic (host or any user can request)
-    if (msg.type === 'mute-participant') {
-      const targetId = msg.targetId;
-      const target = meeting.participants.get(targetId);
-      if (!target) return;
-      target.mutedByHost = true;
-      const tws = clients.get(targetId);
-      if (tws && tws.readyState === 1) {
-        try {
-          tws.send(JSON.stringify({
-            type: 'force-mute',
-            by: participantId,
-            byName: meeting.participants.get(participantId)?.name,
-          }));
-        } catch (_) {}
-      }
-      broadcast(meetingCode, {
-        type: 'participants',
-        participants: getParticipantsList(meeting),
-      });
-      return;
-    }
-
-    if (msg.type === 'unmute-self') {
-      const p = meeting.participants.get(participantId);
-      if (p) p.mutedByHost = false;
-      broadcast(meetingCode, {
-        type: 'participants',
-        participants: getParticipantsList(meeting),
-      });
-      return;
-    }
-
-    // Shared content: URL, local-video meta, document
-    if (msg.type === 'content-start') {
-      const p = meeting.participants.get(participantId);
-      if (!p) return;
-      const ctype = msg.contentType || 'url';
-      meeting.content = {
-        type: ctype,
-        title: String(msg.title || 'Shared content').slice(0, 80),
-        url: msg.url || null,
-        ownerId: participantId,
-        remoteHolderId: participantId,
-        scrollMode: msg.scrollMode === 'free' ? 'free' : 'uniform',
-        scroll: msg.scroll || { x: 0, y: 0 },
-        page: msg.page || 1,
-        media: msg.media || null,
-        fileMeta: msg.fileMeta || null,
-      };
-      broadcast(meetingCode, {
-        type: 'content-state',
-        content: getContentState(meeting),
-      });
-      return;
-    }
-
-    if (msg.type === 'content-stop') {
-      if (!meeting.content) return;
-      const isOwner = meeting.content.ownerId === participantId;
-      const isHost = meeting.participants.get(participantId)?.isHost;
-      if (!isOwner && !isHost) return;
-      meeting.content = null;
-      broadcast(meetingCode, {
-        type: 'content-state',
-        content: null,
-      });
-      return;
-    }
-
-    if (msg.type === 'content-update') {
-      if (!meeting.content) return;
-      const holder = meeting.content.remoteHolderId;
-      const isHolder = holder === participantId;
-      const isOwner = meeting.content.ownerId === participantId;
-      if (!isHolder && !isOwner) return;
-      if (msg.scroll) meeting.content.scroll = msg.scroll;
-      if (msg.page != null) meeting.content.page = msg.page;
-      if (msg.media) meeting.content.media = { ...meeting.content.media, ...msg.media };
-      if (msg.scrollMode) meeting.content.scrollMode = msg.scrollMode === 'free' ? 'free' : 'uniform';
-      if (msg.title) meeting.content.title = String(msg.title).slice(0, 80);
-      broadcast(meetingCode, {
-        type: 'content-update',
-        content: getContentState(meeting),
-        from: participantId,
-      }, participantId);
-      return;
-    }
-
-    // Remote handoff: give control to another user
-    if (msg.type === 'remote-handoff') {
-      if (!meeting.content) return;
-      const targetId = msg.targetId;
-      const isOwner = meeting.content.ownerId === participantId;
-      const isHolder = meeting.content.remoteHolderId === participantId;
-      const isHost = meeting.participants.get(participantId)?.isHost;
-      if (!isOwner && !isHolder && !isHost) return;
-      if (targetId && !meeting.participants.has(targetId)) return;
-      meeting.content.remoteHolderId = targetId || meeting.content.ownerId;
-      broadcast(meetingCode, {
-        type: 'content-state',
-        content: getContentState(meeting),
-      });
-      return;
-    }
-
-    // Claim remote when holder is offline or anyone can pick up
-    if (msg.type === 'remote-claim') {
-      if (!meeting.content) return;
-      const holderId = meeting.content.remoteHolderId;
-      const holderOnline = holderId && clients.has(holderId) && clients.get(holderId)?.readyState === 1;
-      const isOwner = meeting.content.ownerId === participantId;
-      // Owner can always reclaim; others only if holder offline
-      if (isOwner || !holderOnline) {
-        meeting.content.remoteHolderId = participantId;
-        broadcast(meetingCode, {
-          type: 'content-state',
-          content: getContentState(meeting),
-        });
-      }
-      return;
-    }
-
-    // Host ends the meeting for everyone
-    if (msg.type === 'end-meeting') {
-      const p = meeting.participants.get(participantId);
-      if (p && p.isHost) {
-        endMeeting(meetingCode, 'host-ended');
-      }
-      return;
-    }
   });
 
   ws.on('close', () => {
     if (participantId && clients.get(participantId) === ws) {
       clients.delete(participantId);
-      // Notify others of offline so remote can be claimed
-      if (meetingCode) {
-        const meeting = meetings.get(meetingCode);
-        if (meeting) {
-          broadcast(meetingCode, {
-            type: 'participants',
-            participants: getParticipantsList(meeting),
-          });
-          // If content remote holder went offline, keep state but others can claim
-          if (meeting.content && meeting.content.remoteHolderId === participantId) {
-            broadcast(meetingCode, {
-              type: 'content-state',
-              content: getContentState(meeting),
-            });
-          }
-        }
-      }
     }
   });
 

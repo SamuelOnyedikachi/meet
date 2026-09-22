@@ -52,6 +52,25 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_mpl_meeting ON meeting_participants_log(meeting_history_id);
   CREATE INDEX IF NOT EXISTS idx_mpl_user ON meeting_participants_log(user_id);
+
+  CREATE TABLE IF NOT EXISTS scheduled_meetings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    host_user_id INTEGER NOT NULL,
+    host_display_name TEXT,
+    scheduled_start TEXT NOT NULL,
+    scheduled_end TEXT,
+    status TEXT NOT NULL DEFAULT 'scheduled',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    started_at TEXT,
+    ended_at TEXT,
+    FOREIGN KEY (host_user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_scheduled_host ON scheduled_meetings(host_user_id);
+  CREATE INDEX IF NOT EXISTS idx_scheduled_start ON scheduled_meetings(scheduled_start);
+  CREATE INDEX IF NOT EXISTS idx_scheduled_status ON scheduled_meetings(status);
 `);
 
 function createUser({ username, email, passwordHash }) {
@@ -81,7 +100,6 @@ function getUserByUsername(username) {
 }
 
 function findUserByLogin(login) {
-  // login can be email or username
   const byEmail = getUserByEmail(login);
   if (byEmail) return byEmail;
   return getUserByUsername(login);
@@ -132,7 +150,6 @@ function endMeetingHistory(meetingHistoryId) {
 }
 
 function getHistoryForUser(userId, limit = 50) {
-  // Meetings the user hosted OR joined
   return db.prepare(`
     SELECT DISTINCT
       mh.id,
@@ -165,6 +182,61 @@ function getMeetingHistoryById(id) {
   return db.prepare(`SELECT * FROM meeting_history WHERE id = ?`).get(id);
 }
 
+// ----- Scheduled meetings -----
+
+function createScheduledMeeting({ code, name, hostUserId, hostDisplayName, scheduledStart, scheduledEnd }) {
+  const stmt = db.prepare(`
+    INSERT INTO scheduled_meetings (code, name, host_user_id, host_display_name, scheduled_start, scheduled_end, status)
+    VALUES (?, ?, ?, ?, ?, ?, 'scheduled')
+  `);
+  const info = stmt.run(code, name, hostUserId, hostDisplayName || null, scheduledStart, scheduledEnd || null);
+  return getScheduledById(info.lastInsertRowid);
+}
+
+function getScheduledById(id) {
+  return db.prepare(`SELECT * FROM scheduled_meetings WHERE id = ?`).get(id);
+}
+
+function getScheduledByCode(code) {
+  return db.prepare(`SELECT * FROM scheduled_meetings WHERE code = ?`).get(code);
+}
+
+function getScheduledForUser(userId, limit = 50) {
+  return db.prepare(`
+    SELECT * FROM scheduled_meetings
+    WHERE host_user_id = ?
+    ORDER BY
+      CASE status
+        WHEN 'scheduled' THEN 0
+        WHEN 'live' THEN 1
+        WHEN 'ended' THEN 2
+        ELSE 3
+      END,
+      scheduled_start ASC
+    LIMIT ?
+  `).all(userId, limit);
+}
+
+function updateScheduledStatus(id, status, extra = {}) {
+  const sets = ['status = ?'];
+  const vals = [status];
+  if (extra.startedAt) {
+    sets.push('started_at = ?');
+    vals.push(extra.startedAt);
+  }
+  if (extra.endedAt) {
+    sets.push('ended_at = ?');
+    vals.push(extra.endedAt);
+  }
+  vals.push(id);
+  db.prepare(`UPDATE scheduled_meetings SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  return getScheduledById(id);
+}
+
+function deleteScheduled(id, userId) {
+  return db.prepare(`DELETE FROM scheduled_meetings WHERE id = ? AND host_user_id = ?`).run(id, userId);
+}
+
 module.exports = {
   db,
   DB_PATH,
@@ -181,4 +253,10 @@ module.exports = {
   getHistoryForUser,
   getMeetingParticipantsLog,
   getMeetingHistoryById,
+  createScheduledMeeting,
+  getScheduledById,
+  getScheduledByCode,
+  getScheduledForUser,
+  updateScheduledStatus,
+  deleteScheduled,
 };
