@@ -24,7 +24,9 @@ const {
   normalizeParticipantName,
   touchMeeting,
 } = require('../rooms/store');
+const { endMeeting } = require('../rooms/lifecycle');
 const { createLiveKitToken, isLiveKitConfigured } = require('../livekit/tokens');
+const { features } = require('../lib/features');
 
 const {
   PORT,
@@ -67,6 +69,7 @@ function createRequestHandler() {
       accountsEnabled: !!(ACCOUNTS_URL || ACCOUNTS_JWT_SECRET),
       livekitUrl: LIVEKIT_URL || null,
       livekitConfigured: !!(LIVEKIT_URL && LIVEKIT_API_KEY && LIVEKIT_API_SECRET),
+      features,
     });
   }
 

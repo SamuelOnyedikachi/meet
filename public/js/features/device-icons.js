@@ -1,7 +1,8 @@
 (function (global) {
-  global.MeetFeatures = global.MeetFeatures || {};
-  global.MeetFeatures.deviceIcons = {
+  global.MeetRegistry && global.MeetRegistry.register({
     id: 'deviceIcons',
-    messageTypes: ['device'],
-  };
+    register(ctx) {
+      if (ctx.bus) ctx.bus.on('device:toggle', function () {});
+    },
+  });
 })(typeof window !== 'undefined' ? window : globalThis);

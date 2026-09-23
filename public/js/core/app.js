@@ -251,6 +251,9 @@
       const cfg = await api('/api/config');
       accountsEnabled = !!cfg.accountsEnabled;
       livekitUrl = cfg.livekitUrl || livekitUrl || null;
+      if (cfg.features && typeof window.MeetBoot === 'function') {
+        window.MeetBoot(cfg.features);
+      }
     } catch {
       accountsEnabled = false;
     }

@@ -9,15 +9,27 @@ const { createRequestHandler } = require('./http/routes');
 const { attachWebSocket } = require('./ws/hub');
 const { cleanupInactiveMeetings } = require('./rooms/lifecycle');
 const { isLiveKitConfigured } = require('./livekit/tokens');
+const { features } = require('./lib/features');
 
 function start() {
   const handleRequest = createRequestHandler();
-  const server = http.createServer(handleRequest);
+  const server = http.createServer((req, res) => {
+    Promise.resolve(handleRequest(req, res)).catch((err) => {
+      console.error('[http]', req.method, req.url, err);
+      if (!res.headersSent) {
+        try {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message || 'Server error' }));
+        } catch (_) {}
+      }
+    });
+  });
   attachWebSocket(server);
 
   server.listen(config.PORT, '0.0.0.0', () => {
     console.log(`Meet is running at http://0.0.0.0:${config.PORT}`);
     console.log(`[DB] SQLite at ${db.DB_PATH}`);
+    console.log('[features]', JSON.stringify(features));
     if (!isLiveKitConfigured()) {
       console.warn(
         '[WARN] LiveKit env vars not fully set — screenshare/audio need LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET.'

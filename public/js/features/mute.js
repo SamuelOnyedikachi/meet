@@ -1,7 +1,8 @@
 (function (global) {
-  global.MeetFeatures = global.MeetFeatures || {};
-  global.MeetFeatures.mute = {
+  global.MeetRegistry && global.MeetRegistry.register({
     id: 'mute',
-    messageTypes: ['mute-participant', 'unmute-self', 'force-mute'],
-  };
+    register(ctx) {
+      if (ctx.bus) ctx.bus.on('ws:force-mute', function () {});
+    },
+  });
 })(typeof window !== 'undefined' ? window : globalThis);

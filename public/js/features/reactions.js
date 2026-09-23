@@ -1,7 +1,8 @@
 (function (global) {
-  global.MeetFeatures = global.MeetFeatures || {};
-  global.MeetFeatures.reactions = {
+  global.MeetRegistry && global.MeetRegistry.register({
     id: 'reactions',
-    messageTypes: ['reaction'],
-  };
+    register(ctx) {
+      if (ctx.bus) ctx.bus.on('ws:reaction', function () {});
+    },
+  });
 })(typeof window !== 'undefined' ? window : globalThis);

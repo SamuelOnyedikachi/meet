@@ -1,12 +1,12 @@
-/**
- * Feature: chat (Phase 1 — file boundary)
- * Runtime still driven from core/app.js until Phase 2 plugin register().
- * Message types: chat, chat-history
- */
 (function (global) {
-  global.MeetFeatures = global.MeetFeatures || {};
-  global.MeetFeatures.chat = {
+  global.MeetRegistry && global.MeetRegistry.register({
     id: 'chat',
-    messageTypes: ['chat', 'chat-history'],
-  };
+    register(ctx) {
+      const bus = ctx.bus;
+      if (!bus) return;
+      // Core app still owns DOM; plugin documents protocol + future UI mount points
+      bus.on('ws:chat', function () {});
+      bus.on('ws:chat-history', function () {});
+    },
+  });
 })(typeof window !== 'undefined' ? window : globalThis);
