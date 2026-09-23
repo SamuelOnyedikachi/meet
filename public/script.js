@@ -560,6 +560,10 @@
     socket.onopen = () => {
       setWsStatus('connected');
       sendWS({ type: 'register', participantId: currentMeeting.participantId, code: currentMeeting.code });
+      // If we already published screen before WS was ready, re-announce so late joiners see our card
+      if (isSharing) {
+        sendWS({ type: 'start-share' });
+      }
     };
 
     socket.onmessage = (ev) => {
@@ -587,8 +591,12 @@
       if (msg.type === 'participants' || msg.type === 'participant-joined' ||
           msg.type === 'participant-left' || msg.type === 'share-started' || msg.type === 'share-stopped') {
         participants = msg.participants || [];
-        renderParticipants();
-        renderCards();
+        // LiveKit is source of truth for who is actually publishing screen —
+        // merge so late joiners still see cards even if WS sharing flag was missed
+        try { syncSharingFlagsFromLiveKit(); } catch (_) {
+          renderParticipants();
+          renderCards();
+        }
         if ((msg.type === 'participant-left' || msg.type === 'share-stopped') && watchingId === msg.participantId) {
           clearBigView();
         }
@@ -793,6 +801,38 @@
           localIdentity: room.localParticipant?.identity,
           remoteCount: room.remoteParticipants.size,
         });
+        // Publications may finish resolving just after Connected
+        attachExistingRemoteScreenTracks();
+        syncSharingFlagsFromLiveKit();
+      })
+      .on(LK.RoomEvent.ParticipantConnected, (participant) => {
+        // New remote participant — subscribe to any screen share they already have
+        attachParticipantScreenTracks(participant);
+        syncSharingFlagsFromLiveKit();
+      })
+      .on(LK.RoomEvent.TrackPublished, (publication, participant) => {
+        // Remote published a track (including ones already live when we joined)
+        if (
+          participant &&
+          publication &&
+          publication.source === LK.Track.Source.ScreenShare
+        ) {
+          try {
+            if (typeof publication.setSubscribed === 'function' && !publication.isSubscribed) {
+              publication.setSubscribed(true);
+            }
+          } catch (_) {}
+          if (publication.track && publication.track.kind === LK.Track.Kind.Video) {
+            handleTrackSubscribed(publication.track, publication, participant);
+          }
+          markParticipantSharing(participant.identity, true);
+        }
+      })
+      .on(LK.RoomEvent.TrackUnpublished, (publication, participant) => {
+        if (publication && publication.source === LK.Track.Source.ScreenShare) {
+          markParticipantSharing(participant?.identity, false);
+          if (watchingId === participant?.identity) clearBigView();
+        }
       })
       .on(LK.RoomEvent.Disconnected, (reason) => {
         console.warn('[LiveKit] disconnected', reason);
@@ -800,12 +840,22 @@
 
     try {
       console.log('[LiveKit] connecting to', url);
-      await room.connect(url, tokenData.token);
+      await room.connect(url, tokenData.token, { autoSubscribe: true });
       console.log('[LiveKit] connect OK, state=', room.state);
       micOn = false;
       updateMicButton();
-      // Pick up any screen shares that were already published before we joined
+      // Pick up any screen shares already published before we joined
       attachExistingRemoteScreenTracks();
+      syncSharingFlagsFromLiveKit();
+      // LiveKit sometimes delivers pubs a tick later
+      setTimeout(() => {
+        attachExistingRemoteScreenTracks();
+        syncSharingFlagsFromLiveKit();
+      }, 400);
+      setTimeout(() => {
+        attachExistingRemoteScreenTracks();
+        syncSharingFlagsFromLiveKit();
+      }, 1500);
     } catch (e) {
       console.error('[LiveKit] connect failed', e);
       alert('Could not connect to media server: ' + (e.message || e));
@@ -813,18 +863,71 @@
     }
   }
 
+  function markParticipantSharing(identity, sharing) {
+    if (!identity) return;
+    const p = participants.find((x) => x.id === identity);
+    if (p) {
+      if (!!p.sharing !== !!sharing) {
+        p.sharing = !!sharing;
+        renderCards();
+        renderParticipants();
+      }
+    } else if (sharing) {
+      // Participant row may arrive via WS slightly later — keep a pending flag on remoteMedia
+      if (!remoteMedia[identity]) remoteMedia[identity] = {};
+      remoteMedia[identity].pendingShare = true;
+    }
+  }
+
+  function syncSharingFlagsFromLiveKit() {
+    if (room) {
+      room.remoteParticipants.forEach((participant) => {
+        let hasScreen = false;
+        participant.trackPublications.forEach((publication) => {
+          if (publication.source === LK.Track.Source.ScreenShare) {
+            hasScreen = true;
+            if (
+              publication.kind === LK.Track.Kind.Video ||
+              (publication.track && publication.track.kind === LK.Track.Kind.Video)
+            ) {
+              try {
+                if (typeof publication.setSubscribed === 'function' && !publication.isSubscribed) {
+                  publication.setSubscribed(true);
+                }
+              } catch (_) {}
+            }
+          }
+        });
+        markParticipantSharing(participant.identity, hasScreen);
+      });
+    }
+    renderParticipants();
+    renderCards();
+  }
+
+  function attachParticipantScreenTracks(participant) {
+    if (!participant) return;
+    participant.trackPublications.forEach((publication) => {
+      if (publication.source !== LK.Track.Source.ScreenShare) return;
+      markParticipantSharing(participant.identity, true);
+      try {
+        if (typeof publication.setSubscribed === 'function' && !publication.isSubscribed) {
+          publication.setSubscribed(true);
+        }
+      } catch (_) {}
+      if (
+        publication.track &&
+        publication.track.kind === LK.Track.Kind.Video
+      ) {
+        handleTrackSubscribed(publication.track, publication, participant);
+      }
+    });
+  }
+
   function attachExistingRemoteScreenTracks() {
     if (!room) return;
     room.remoteParticipants.forEach((participant) => {
-      participant.trackPublications.forEach((publication) => {
-        if (
-          publication.track &&
-          publication.source === LK.Track.Source.ScreenShare &&
-          publication.track.kind === LK.Track.Kind.Video
-        ) {
-          handleTrackSubscribed(publication.track, publication, participant);
-        }
-      });
+      attachParticipantScreenTracks(participant);
     });
   }
 
