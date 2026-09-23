@@ -720,9 +720,11 @@
     // we turn it off for reliability.
     // Audio-first on poor networks: Opus with DTX, lower video priority.
     // adaptiveStream off avoids black screen-share when layout size is 0.
+    // Screen share: prioritize resolution for video (YouTube etc.).
+    // Audio stays speech-optimized; screen video needs higher bitrate/fps than slides.
     room = new LK.Room({
       adaptiveStream: false,
-      dynacast: true,
+      dynacast: false,
       reconnectPolicy: {
         nextRetryDelayInMs: (context) => Math.min(1000 * Math.pow(2, context.retryCount || 0), 15000),
       },
@@ -731,14 +733,16 @@
         audioPreset: LK.AudioPresets?.speech || undefined,
         dtx: true,
         red: true,
+        // ~6 Mbps @ 30fps holds 1080p motion much better than 2.5 Mbps @ 24fps
         screenShareEncoding: {
-          maxBitrate: 2_500_000,
-          maxFramerate: 24,
+          maxBitrate: 6_000_000,
+          maxFramerate: 30,
         },
         videoEncoding: {
-          maxBitrate: 1_200_000,
+          maxBitrate: 1_500_000,
           maxFramerate: 24,
         },
+        degradationPreference: 'maintain-resolution',
       },
       audioCaptureDefaults: {
         echoCancellation: true,
@@ -1158,34 +1162,41 @@
     try {
       // createScreenTracks gives us the MediaStreamTrack so we can log + set contentHint
       // before publish. Falls back to setScreenShareEnabled if createScreenTracks is unavailable.
+      // contentHint "motion" = encoder prioritizes smooth video (YouTube, demos)
+      // "detail" is better for static slides/docs — motion is the common case in calls
       if (typeof room.localParticipant.createScreenTracks === 'function') {
         const tracks = await room.localParticipant.createScreenTracks({
           audio: true,
           resolution: { width: 1920, height: 1080, frameRate: 30 },
-          contentHint: 'detail',
+          contentHint: 'motion',
         });
-        for (const t of tracks) {
-          if (t.mediaStreamTrack && t.kind === 'video') {
-            try { t.mediaStreamTrack.contentHint = 'detail'; } catch (_) {}
+        for (const track of tracks) {
+          if (track.mediaStreamTrack && track.kind === 'video') {
+            try { track.mediaStreamTrack.contentHint = 'motion'; } catch (_) {}
           }
           console.log('[LiveKit] publishing screen track', {
-            kind: t.kind,
-            source: t.source,
-            id: t.mediaStreamTrack?.id,
-            readyState: t.mediaStreamTrack?.readyState,
-            label: t.mediaStreamTrack?.label,
+            kind: track.kind,
+            source: track.source,
+            id: track.mediaStreamTrack?.id,
+            readyState: track.mediaStreamTrack?.readyState,
+            label: track.mediaStreamTrack?.label,
           });
-          await room.localParticipant.publishTrack(t, {
-            source: t.kind === 'video' ? LK.Track.Source.ScreenShare : LK.Track.Source.ScreenShareAudio,
+          await room.localParticipant.publishTrack(track, {
+            source: track.kind === 'video' ? LK.Track.Source.ScreenShare : LK.Track.Source.ScreenShareAudio,
             videoCodec: 'vp8',
             simulcast: false,
+            videoEncoding: {
+              maxBitrate: 6_000_000,
+              maxFramerate: 30,
+            },
+            degradationPreference: 'maintain-resolution',
           });
         }
       } else {
         await room.localParticipant.setScreenShareEnabled(true, {
           audio: true,
           resolution: { width: 1920, height: 1080, frameRate: 30 },
-          contentHint: 'detail',
+          contentHint: 'motion',
         });
       }
     } catch (e) {
