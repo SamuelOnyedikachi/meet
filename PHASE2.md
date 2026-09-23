@@ -1,4 +1,4 @@
-# Phase 2 — Plugins complete
+# Phase 2 — Plugins completed
 
 ## Server plugins (`src/plugins/`)
 
