@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link rel="stylesheet" href="styles.css?v=20260923q2">
+  <link rel="stylesheet" href="styles.css?v=20260923chat2">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤝</text></svg>">
 </head>
 <body>
@@ -284,15 +284,21 @@
               <div class="chat-messages" id="chatMessages"></div>
               <div id="mentionMenu" class="mention-menu hidden" role="listbox"></div>
               <form class="chat-form" id="chatForm">
-                <div class="chat-form-row">
-                  <button type="button" id="chatImageBtn" class="btn icon-btn" title="Send image (compressed WebP)">
+                <div class="chat-form-row chat-form-row-input">
+                  <input id="chatInput" type="text" maxlength="2000" placeholder="Message… (@ to mention)" autocomplete="off">
+                  <button type="submit" class="btn icon-btn chat-send-btn" title="Send"><i class="fa-solid fa-paper-plane"></i></button>
+                </div>
+                <div class="chat-form-row chat-form-row-tools">
+                  <button type="button" id="chatImageBtn" class="btn icon-btn" title="Send image (WebP)">
                     <i class="fa-regular fa-image"></i>
                   </button>
-                  <button type="button" id="chatAttachBtn" class="btn icon-btn" title="Attach file (original)">
+                  <button type="button" id="chatAttachBtn" class="btn icon-btn" title="Attach file">
                     <i class="fa-solid fa-paperclip"></i>
                   </button>
-                  <input id="chatInput" type="text" maxlength="2000" placeholder="Message… (@ to mention)" autocomplete="off">
-                  <button type="submit" class="btn icon-btn" title="Send"><i class="fa-solid fa-paper-plane"></i></button>
+                  <button type="button" id="chatVoiceBtn" class="btn icon-btn" title="Voice note">
+                    <i class="fa-solid fa-microphone"></i>
+                  </button>
+                  <span id="chatVoiceStatus" class="chat-voice-status hidden"></span>
                 </div>
                 <input type="file" id="chatImageInput" accept="image/*" class="hidden-file" hidden>
                 <input type="file" id="chatFileInput" class="hidden-file" hidden>
@@ -380,6 +386,21 @@
               <button id="screenFsBtn" class="btn icon-btn screen-fs-btn" title="Fullscreen shared screen">
                 <i class="fa-solid fa-expand"></i>
               </button>
+              <button id="chatOverlayBtn" class="btn icon-btn chat-overlay-btn" title="Toggle chat on screen (C)" aria-pressed="false">
+                <i class="fa-regular fa-comments"></i>
+              </button>
+              <div id="chatPipStack" class="chat-pip-stack" aria-live="polite"></div>
+              <div id="chatScreenOverlay" class="chat-screen-overlay hidden">
+                <div class="chat-screen-overlay-header">
+                  <span>Chat</span>
+                  <button type="button" id="chatOverlayClose" class="btn icon-btn" title="Close"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div id="chatOverlayMessages" class="chat-overlay-messages"></div>
+                <form id="chatOverlayForm" class="chat-overlay-form">
+                  <input id="chatOverlayInput" type="text" maxlength="2000" placeholder="Reply…" autocomplete="off">
+                  <button type="submit" class="btn icon-btn"><i class="fa-solid fa-paper-plane"></i></button>
+                </form>
+              </div>
             </div>
             <div class="call-controls">
               <button id="shareBtn" class="btn call-btn" title="Share your screen">
@@ -529,6 +550,6 @@
   <script src="js/features/mute.js?v=20260923p2"></script>
   <script src="js/features/device-icons.js?v=20260923p2"></script>
   <script src="js/main.js?v=20260923p2"></script>
-  <script src="js/core/app.js?v=20260923q2"></script>
+  <script src="js/core/app.js?v=20260923chat2"></script>
 </body>
 </html>

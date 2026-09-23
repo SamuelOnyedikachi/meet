@@ -27,9 +27,11 @@ module.exports = {
 
       let attachment = null;
       if (msg.attachment && typeof msg.attachment === 'object') {
-        const kind = msg.attachment.kind === 'image' ? 'image' : 'file';
-        const name = String(msg.attachment.name || 'file').slice(0, 120);
-        const mime = String(msg.attachment.mime || 'application/octet-stream').slice(0, 120);
+        let kind = 'file';
+        if (msg.attachment.kind === 'image') kind = 'image';
+        else if (msg.attachment.kind === 'voice') kind = 'voice';
+        const name = String(msg.attachment.name || (kind === 'voice' ? 'voice.webm' : 'file')).slice(0, 120);
+        const mime = String(msg.attachment.mime || (kind === 'voice' ? 'audio/webm' : 'application/octet-stream')).slice(0, 120);
         const dataUrl = String(msg.attachment.dataUrl || '');
         const maxChars = kind === 'image' ? MAX_IMAGE_DATA_CHARS : MAX_FILE_DATA_CHARS;
         if (dataUrl.startsWith('data:') && dataUrl.length <= maxChars) {

@@ -2064,6 +2064,16 @@
           '<img class="chat-attach-img" src="' + a.dataUrl.replace(/"/g, '') + '" alt="' + escapeHtml(a.name || 'image') + '" data-full="' + a.dataUrl.replace(/"/g, '') + '" data-name="' + escapeHtml(a.name || 'image.webp') + '">' +
           '<a class="chat-attach-file" href="' + a.dataUrl.replace(/"/g, '') + '" download="' + escapeHtml(a.name || 'image.webp') + '"><i class="fa-solid fa-download"></i> ' + escapeHtml(a.name || 'image.webp') + '</a>' +
           '</div>';
+      } else if (a.kind === 'voice' && a.dataUrl) {
+        attachHtml =
+          '<div class="chat-voice-player" data-voice="1">' +
+          '<audio controls preload="metadata" src="' + a.dataUrl.replace(/"/g, '') + '"></audio>' +
+          '<div class="chat-voice-speeds">' +
+          '<button type="button" data-rate="1" class="active">1x</button>' +
+          '<button type="button" data-rate="1.5">1.5x</button>' +
+          '<button type="button" data-rate="2">2x</button>' +
+          '<button type="button" data-rate="3">3x</button>' +
+          '</div></div>';
       } else if (a.dataUrl) {
         attachHtml =
           '<div class="chat-attach">' +
@@ -2087,9 +2097,84 @@
         openChatImagePreview(img.getAttribute('data-full'), img.getAttribute('data-name'));
       });
     }
+    var voiceWrap = row.querySelector('.chat-voice-player');
+    if (voiceWrap) bindVoicePlayer(voiceWrap);
 
     box.appendChild(row);
     box.scrollTop = box.scrollHeight;
+
+    // Mirror into screen overlay + PiP when fullscreen / overlay open
+    mirrorChatToOverlay(row);
+    if (!isMe) maybeShowChatPip(msg, who, body, msg.attachment);
+  }
+
+  function bindVoicePlayer(wrap) {
+    var audio = wrap.querySelector('audio');
+    if (!audio) return;
+    wrap.querySelectorAll('.chat-voice-speeds button').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var rate = parseFloat(btn.getAttribute('data-rate') || '1') || 1;
+        audio.playbackRate = rate;
+        wrap.querySelectorAll('.chat-voice-speeds button').forEach(function (b) {
+          b.classList.toggle('active', b === btn);
+        });
+      });
+    });
+  }
+
+  function isScreenFullscreen() {
+    var fs = document.fullscreenElement;
+    return !!(fs && (fs.id === 'bigView' || (fs.contains && fs.contains($('bigView')))));
+  }
+
+  function maybeShowChatPip(msg, whoHtml, bodyHtml, attachment) {
+    if (!isScreenFullscreen()) return;
+    var stack = $('chatPipStack');
+    if (!stack) return;
+    var pip = document.createElement('div');
+    pip.className = 'chat-pip';
+    var preview = '';
+    if (msg.text) preview = escapeHtml(String(msg.text).slice(0, 120));
+    else if (attachment && attachment.kind === 'voice') preview = '🎤 Voice note';
+    else if (attachment && attachment.kind === 'image') preview = '🖼️ Image';
+    else if (attachment) preview = '📎 Attachment';
+    pip.innerHTML = '<div class="pip-who">' + whoHtml + '</div><div class="pip-text">' + preview + '</div>';
+    pip.addEventListener('click', function () {
+      openChatScreenOverlay();
+      pip.remove();
+    });
+    stack.appendChild(pip);
+    setTimeout(function () { try { pip.remove(); } catch (_) {} }, 6000);
+  }
+
+  function mirrorChatToOverlay(sourceRow) {
+    var box = $('chatOverlayMessages');
+    if (!box) return;
+    var clone = sourceRow.cloneNode(true);
+    var voice = clone.querySelector('.chat-voice-player');
+    if (voice) bindVoicePlayer(voice);
+    box.appendChild(clone);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function openChatScreenOverlay() {
+    var el = $('chatScreenOverlay');
+    if (!el) return;
+    el.classList.remove('hidden');
+    $('chatOverlayBtn')?.setAttribute('aria-pressed', 'true');
+    $('chatOverlayInput')?.focus();
+  }
+  function closeChatScreenOverlay() {
+    var el = $('chatScreenOverlay');
+    if (!el) return;
+    el.classList.add('hidden');
+    $('chatOverlayBtn')?.setAttribute('aria-pressed', 'false');
+  }
+  function toggleChatScreenOverlay() {
+    var el = $('chatScreenOverlay');
+    if (!el) return;
+    if (el.classList.contains('hidden')) openChatScreenOverlay();
+    else closeChatScreenOverlay();
   }
 
   function openChatImagePreview(src, name) {
@@ -2731,6 +2816,110 @@
     });
   }
   if ($('chatPreviewClose')) $('chatPreviewClose').addEventListener('click', closeChatImagePreview);
+
+  // Voice notes
+  var voiceRecorder = null;
+  var voiceChunks = [];
+  var voiceStream = null;
+  var voiceRecording = false;
+
+  async function toggleVoiceNote() {
+    if (voiceRecording) {
+      stopVoiceNote();
+      return;
+    }
+    try {
+      voiceStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      voiceChunks = [];
+      var mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : (MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '');
+      voiceRecorder = mime ? new MediaRecorder(voiceStream, { mimeType: mime }) : new MediaRecorder(voiceStream);
+      voiceRecorder.ondataavailable = function (ev) {
+        if (ev.data && ev.data.size) voiceChunks.push(ev.data);
+      };
+      voiceRecorder.onstop = async function () {
+        try {
+          var blob = new Blob(voiceChunks, { type: voiceRecorder.mimeType || 'audio/webm' });
+          if (blob.size > 2 * 1024 * 1024) {
+            alert('Voice note too long (max ~2 MB). Keep it shorter.');
+            return;
+          }
+          var dataUrl = await readFileAsDataUrl(blob);
+          if (dataUrl.length > 2800000) {
+            alert('Voice note too large to send.');
+            return;
+          }
+          sendChatPayload('', {
+            kind: 'voice',
+            name: 'voice-note.webm',
+            mime: blob.type || 'audio/webm',
+            size: blob.size,
+            dataUrl: dataUrl,
+          });
+        } catch (e) {
+          alert(e.message || 'Could not send voice note');
+        } finally {
+          if (voiceStream) voiceStream.getTracks().forEach(function (tr) { tr.stop(); });
+          voiceStream = null;
+        }
+      };
+      voiceRecorder.start();
+      voiceRecording = true;
+      var btn = $('chatVoiceBtn');
+      if (btn) btn.classList.add('recording');
+      var st = $('chatVoiceStatus');
+      if (st) {
+        st.textContent = 'Recording… tap mic to send';
+        st.classList.remove('hidden');
+        st.classList.add('recording');
+      }
+    } catch (e) {
+      alert('Microphone permission needed for voice notes.');
+    }
+  }
+  function stopVoiceNote() {
+    voiceRecording = false;
+    var btn = $('chatVoiceBtn');
+    if (btn) btn.classList.remove('recording');
+    var st = $('chatVoiceStatus');
+    if (st) {
+      st.classList.add('hidden');
+      st.classList.remove('recording');
+      st.textContent = '';
+    }
+    if (voiceRecorder && voiceRecorder.state !== 'inactive') {
+      try { voiceRecorder.stop(); } catch (_) {}
+    } else if (voiceStream) {
+      voiceStream.getTracks().forEach(function (tr) { tr.stop(); });
+      voiceStream = null;
+    }
+  }
+  if ($('chatVoiceBtn')) $('chatVoiceBtn').addEventListener('click', toggleVoiceNote);
+
+  // Screen chat overlay + shortcut C
+  if ($('chatOverlayBtn')) $('chatOverlayBtn').addEventListener('click', toggleChatScreenOverlay);
+  if ($('chatOverlayClose')) $('chatOverlayClose').addEventListener('click', closeChatScreenOverlay);
+  if ($('chatOverlayForm')) {
+    $('chatOverlayForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var input = $('chatOverlayInput');
+      var text = (input && input.value || '').trim();
+      if (!text) return;
+      sendChatPayload(text, null);
+      if (input) input.value = '';
+    });
+  }
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'c' || e.key === 'C') {
+      if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable)) return;
+      if (!$('meetingView') || $('meetingView').classList.contains('hidden')) return;
+      e.preventDefault();
+      toggleChatScreenOverlay();
+    }
+    if (e.key === 'Escape') closeChatScreenOverlay();
+  });
+
   if ($('chatPreviewBackdrop')) $('chatPreviewBackdrop').addEventListener('click', closeChatImagePreview);
 
   // Apply self color when auth / meeting ready
