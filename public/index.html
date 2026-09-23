@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link rel="stylesheet" href="styles.css?v=20260922c">
+  <link rel="stylesheet" href="styles.css?v=20260923chat">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤝</text></svg>">
 </head>
 <body>
@@ -282,10 +282,31 @@
                 <i class="fa-regular fa-comments"></i> Chat
               </div>
               <div class="chat-messages" id="chatMessages"></div>
+              <div id="mentionMenu" class="mention-menu hidden" role="listbox"></div>
               <form class="chat-form" id="chatForm">
-                <input id="chatInput" type="text" maxlength="500" placeholder="Message…" autocomplete="off">
-                <button type="submit" class="btn icon-btn" title="Send"><i class="fa-solid fa-paper-plane"></i></button>
+                <div class="chat-form-row">
+                  <button type="button" id="chatImageBtn" class="btn icon-btn" title="Send image (compressed WebP)">
+                    <i class="fa-regular fa-image"></i>
+                  </button>
+                  <button type="button" id="chatAttachBtn" class="btn icon-btn" title="Attach file (original)">
+                    <i class="fa-solid fa-paperclip"></i>
+                  </button>
+                  <input id="chatInput" type="text" maxlength="2000" placeholder="Message… (@ to mention)" autocomplete="off">
+                  <button type="submit" class="btn icon-btn" title="Send"><i class="fa-solid fa-paper-plane"></i></button>
+                </div>
+                <input type="file" id="chatImageInput" accept="image/*" class="hidden-file" hidden>
+                <input type="file" id="chatFileInput" class="hidden-file" hidden>
               </form>
+            </div>
+            <div id="chatPreviewOverlay" class="chat-preview-overlay hidden" aria-hidden="true">
+              <div class="chat-preview-backdrop" id="chatPreviewBackdrop"></div>
+              <div class="chat-preview-card">
+                <img id="chatPreviewImg" alt="Preview">
+                <div class="chat-preview-actions">
+                  <a id="chatPreviewDownload" class="btn small-btn" download>Download</a>
+                  <button type="button" id="chatPreviewClose" class="btn small-btn">Close</button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -492,6 +513,6 @@
   <script src="js/features/mute.js?v=20260923p2"></script>
   <script src="js/features/device-icons.js?v=20260923p2"></script>
   <script src="js/main.js?v=20260923p2"></script>
-  <script src="js/core/app.js?v=20260923q1"></script>
+  <script src="js/core/app.js?v=20260923chat"></script>
 </body>
 </html>

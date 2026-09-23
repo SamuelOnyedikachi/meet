@@ -210,6 +210,7 @@
       userArea?.classList.remove('hidden');
       const name = displayNameOf(currentUser);
       if (userLabel) userLabel.textContent = name;
+      try { if (typeof applySelfChatColor === 'function') applySelfChatColor(); } catch (_) {}
       if (createYourName && !createYourName.value) createYourName.value = name;
       if (joinYourName && !joinYourName.value) joinYourName.value = name;
     } else {
@@ -1887,15 +1888,208 @@
   let pdfDoc = null;
   let pdfPageNum = 1;
 
+  function hashHue(str) {
+    var h = 0;
+    var s = String(str || 'user');
+    for (var i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+    return Math.abs(h) % 360;
+  }
+
+  function selfChatColor() {
+    var key = (currentUser && (currentUser.displayName || currentUser.username || currentUser.email))
+      || (currentMeeting && currentMeeting.participantName)
+      || 'me';
+    return 'hsl(' + hashHue(key) + ' 70% 55%)';
+  }
+
+  function applySelfChatColor() {
+    var c = selfChatColor();
+    document.documentElement.style.setProperty('--chat-self-color', c);
+  }
+
+  function linkifyAndMentions(text, mentions) {
+    var escaped = escapeHtml(text || '');
+    // URLs: http(s)://... or bare domain.tld/...
+    escaped = escaped.replace(
+      /(https?:\/\/[^\s<]+)|(www\.[^\s<]+)|(\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}(?:\/[^\s<]*)?)/gi,
+      function (m) {
+        var href = m;
+        if (!/^https?:\/\//i.test(href)) href = 'https://' + href;
+        return '<a class="chat-link" href="' + escapeHtml(href) + '" target="_blank" rel="noopener noreferrer">' + m + '</a>';
+      }
+    );
+    // @Name mentions
+    if (mentions && mentions.length) {
+      mentions.forEach(function (mn) {
+        var name = mn.name || '';
+        if (!name) return;
+        var re = new RegExp('@' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'gi');
+        escaped = escaped.replace(re, '<span class="chat-mention">@' + escapeHtml(name) + '</span>');
+      });
+    } else {
+      escaped = escaped.replace(/@([A-Za-z0-9_.\- ]{1,40})/g, '<span class="chat-mention">@$1</span>');
+    }
+    return escaped;
+  }
+
+  function formatBytes(n) {
+    if (!n || n < 1024) return (n || 0) + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+    return (n / (1024 * 1024)).toFixed(1) + ' MB';
+  }
+
   function appendChatMessage(msg) {
     const box = $('chatMessages');
     if (!box) return;
+    applySelfChatColor();
     const row = document.createElement('div');
-    row.className = 'chat-msg-row';
     const isMe = msg.participantId === currentMeeting?.participantId;
-    row.innerHTML = '<span class="chat-who">' + escapeHtml(isMe ? 'You' : (msg.name || '')) + '</span> ' + escapeHtml(msg.text || '');
+    row.className = 'chat-msg-row' + (isMe ? ' is-me' : '');
+    if (isMe) row.style.setProperty('--chat-self-color', selfChatColor());
+
+    var who = escapeHtml(isMe ? 'You' : (msg.name || 'User'));
+    var body = linkifyAndMentions(msg.text || '', msg.mentions);
+    var attachHtml = '';
+    if (msg.attachment) {
+      var a = msg.attachment;
+      if (a.kind === 'image' && a.dataUrl) {
+        attachHtml =
+          '<div class="chat-attach">' +
+          '<img class="chat-attach-img" src="' + a.dataUrl.replace(/"/g, '') + '" alt="' + escapeHtml(a.name || 'image') + '" data-full="' + a.dataUrl.replace(/"/g, '') + '" data-name="' + escapeHtml(a.name || 'image.webp') + '">' +
+          '<a class="chat-attach-file" href="' + a.dataUrl.replace(/"/g, '') + '" download="' + escapeHtml(a.name || 'image.webp') + '"><i class="fa-solid fa-download"></i> ' + escapeHtml(a.name || 'image.webp') + '</a>' +
+          '</div>';
+      } else if (a.dataUrl) {
+        attachHtml =
+          '<div class="chat-attach">' +
+          '<a class="chat-attach-file" href="' + a.dataUrl.replace(/"/g, '') + '" download="' + escapeHtml(a.name || 'file') + '">' +
+          '<i class="fa-solid fa-paperclip"></i> ' + escapeHtml(a.name || 'file') +
+          (a.size ? ' <span>(' + formatBytes(a.size) + ')</span>' : '') +
+          '</a></div>';
+      } else if (a.omitted) {
+        attachHtml = '<div class="chat-attach"><span class="chat-attach-file">Attachment too large for history replay</span></div>';
+      }
+    }
+
+    row.innerHTML =
+      '<span class="chat-who">' + who + '</span>' +
+      (body ? '<div class="chat-msg-body">' + body + '</div>' : '') +
+      attachHtml;
+
+    var img = row.querySelector('.chat-attach-img');
+    if (img) {
+      img.addEventListener('click', function () {
+        openChatImagePreview(img.getAttribute('data-full'), img.getAttribute('data-name'));
+      });
+    }
+
     box.appendChild(row);
     box.scrollTop = box.scrollHeight;
+  }
+
+  function openChatImagePreview(src, name) {
+    var overlay = $('chatPreviewOverlay');
+    var img = $('chatPreviewImg');
+    var dl = $('chatPreviewDownload');
+    if (!overlay || !img) return;
+    img.src = src || '';
+    if (dl) {
+      dl.href = src || '#';
+      dl.setAttribute('download', name || 'image.webp');
+    }
+    overlay.classList.remove('hidden');
+    overlay.setAttribute('aria-hidden', 'false');
+  }
+
+  function closeChatImagePreview() {
+    var overlay = $('chatPreviewOverlay');
+    if (!overlay) return;
+    overlay.classList.add('hidden');
+    overlay.setAttribute('aria-hidden', 'true');
+    var img = $('chatPreviewImg');
+    if (img) img.src = '';
+  }
+
+  function compressImageToWebp(file, maxEdge, quality) {
+    maxEdge = maxEdge || 720;
+    quality = quality || 0.82;
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(file);
+      var img = new Image();
+      img.onload = function () {
+        var w = img.naturalWidth || img.width;
+        var h = img.naturalHeight || img.height;
+        var scale = Math.min(1, maxEdge / Math.max(w, h));
+        var cw = Math.max(1, Math.round(w * scale));
+        var ch = Math.max(1, Math.round(h * scale));
+        var canvas = document.createElement('canvas');
+        canvas.width = cw;
+        canvas.height = ch;
+        var ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, cw, ch);
+        URL.revokeObjectURL(url);
+        canvas.toBlob(
+          function (blob) {
+            if (!blob) return reject(new Error('Could not compress image'));
+            var reader = new FileReader();
+            reader.onload = function () {
+              resolve({
+                dataUrl: reader.result,
+                mime: 'image/webp',
+                name: (file.name || 'image').replace(/\.[^.]+$/, '') + '.webp',
+                size: blob.size,
+              });
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          },
+          'image/webp',
+          quality
+        );
+      };
+      img.onerror = function () {
+        URL.revokeObjectURL(url);
+        reject(new Error('Invalid image'));
+      };
+      img.src = url;
+    });
+  }
+
+  function readFileAsDataUrl(file) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () {
+        resolve(reader.result);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function extractMentionsFromText(text) {
+    var found = [];
+    var re = /@([A-Za-z0-9_.\- ]{1,40})/g;
+    var m;
+    while ((m = re.exec(text))) {
+      var name = m[1].trim();
+      var p = participants.find(function (x) {
+        return x.name && x.name.toLowerCase() === name.toLowerCase();
+      });
+      if (p) found.push({ id: p.id, name: p.name });
+      else found.push({ id: '', name: name });
+    }
+    return found;
+  }
+
+  function sendChatPayload(text, attachment) {
+    text = (text || '').trim();
+    if (!text && !attachment) return;
+    var mentions = extractMentionsFromText(text);
+    sendWS({
+      type: 'chat',
+      text: text,
+      mentions: mentions,
+      attachment: attachment || null,
+    });
   }
 
   function showReaction(msg) {
@@ -2286,9 +2480,155 @@
     var input = $('chatInput');
     var text = (input && input.value || '').trim();
     if (!text) return;
-    sendWS({ type: 'chat', text: text });
+    sendChatPayload(text, null);
     if (input) input.value = '';
+    hideMentionMenu();
   });
+
+  // --- @mention autocomplete ---
+  var mentionActiveIndex = 0;
+  function hideMentionMenu() {
+    var menu = $('mentionMenu');
+    if (menu) menu.classList.add('hidden');
+  }
+  function showMentionMenu(filter) {
+    var menu = $('mentionMenu');
+    if (!menu) return;
+    var q = (filter || '').toLowerCase();
+    var list = (participants || []).filter(function (p) {
+      if (!p.name) return false;
+      if (currentMeeting && p.id === currentMeeting.participantId) return false;
+      return !q || p.name.toLowerCase().indexOf(q) === 0 || p.name.toLowerCase().indexOf(q) >= 0;
+    }).slice(0, 8);
+    if (!list.length) {
+      menu.classList.add('hidden');
+      return;
+    }
+    mentionActiveIndex = 0;
+    menu.innerHTML = list.map(function (p, i) {
+      return '<div class="mention-item' + (i === 0 ? ' active' : '') + '" data-name="' + escapeHtml(p.name) + '" role="option">' + escapeHtml(p.name) + '</div>';
+    }).join('');
+    menu.classList.remove('hidden');
+    menu.querySelectorAll('.mention-item').forEach(function (el) {
+      el.addEventListener('mousedown', function (ev) {
+        ev.preventDefault();
+        insertMention(el.getAttribute('data-name'));
+      });
+    });
+  }
+  function insertMention(name) {
+    var input = $('chatInput');
+    if (!input || !name) return;
+    var v = input.value || '';
+    var caret = input.selectionStart != null ? input.selectionStart : v.length;
+    var before = v.slice(0, caret);
+    var after = v.slice(caret);
+    var at = before.lastIndexOf('@');
+    if (at < 0) return;
+    var next = before.slice(0, at) + '@' + name + ' ' + after;
+    input.value = next;
+    var pos = at + name.length + 2;
+    input.setSelectionRange(pos, pos);
+    input.focus();
+    hideMentionMenu();
+  }
+  if ($('chatInput')) {
+    $('chatInput').addEventListener('input', function () {
+      var input = $('chatInput');
+      var v = input.value || '';
+      var caret = input.selectionStart != null ? input.selectionStart : v.length;
+      var before = v.slice(0, caret);
+      var m = before.match(/@([A-Za-z0-9_.\-]*)$/);
+      if (m) showMentionMenu(m[1] || '');
+      else hideMentionMenu();
+    });
+    $('chatInput').addEventListener('keydown', function (e) {
+      var menu = $('mentionMenu');
+      if (!menu || menu.classList.contains('hidden')) return;
+      var items = menu.querySelectorAll('.mention-item');
+      if (!items.length) return;
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        mentionActiveIndex = (mentionActiveIndex + 1) % items.length;
+        items.forEach(function (el, i) { el.classList.toggle('active', i === mentionActiveIndex); });
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        mentionActiveIndex = (mentionActiveIndex - 1 + items.length) % items.length;
+        items.forEach(function (el, i) { el.classList.toggle('active', i === mentionActiveIndex); });
+      } else if (e.key === 'Enter' || e.key === 'Tab') {
+        var active = items[mentionActiveIndex];
+        if (active) {
+          e.preventDefault();
+          insertMention(active.getAttribute('data-name'));
+        }
+      } else if (e.key === 'Escape') {
+        hideMentionMenu();
+      }
+    });
+  }
+
+  // Image (compressed webp 720) vs file attachment (original)
+  if ($('chatImageBtn') && $('chatImageInput')) {
+    $('chatImageBtn').addEventListener('click', function () { $('chatImageInput').click(); });
+    $('chatImageInput').addEventListener('change', async function () {
+      var file = $('chatImageInput').files && $('chatImageInput').files[0];
+      $('chatImageInput').value = '';
+      if (!file) return;
+      try {
+        var compressed = await compressImageToWebp(file, 720, 0.82);
+        if (compressed.dataUrl.length > 900000) {
+          alert('Image still too large after compression. Try a smaller picture.');
+          return;
+        }
+        var caption = ($('chatInput') && $('chatInput').value || '').trim();
+        sendChatPayload(caption, {
+          kind: 'image',
+          name: compressed.name,
+          mime: compressed.mime,
+          size: compressed.size,
+          dataUrl: compressed.dataUrl,
+        });
+        if ($('chatInput')) $('chatInput').value = '';
+      } catch (err) {
+        alert(err.message || 'Could not process image');
+      }
+    });
+  }
+  if ($('chatAttachBtn') && $('chatFileInput')) {
+    $('chatAttachBtn').addEventListener('click', function () { $('chatFileInput').click(); });
+    $('chatFileInput').addEventListener('change', async function () {
+      var file = $('chatFileInput').files && $('chatFileInput').files[0];
+      $('chatFileInput').value = '';
+      if (!file) return;
+      if (file.size > 2 * 1024 * 1024) {
+        alert('Attachments are limited to 2 MB over chat. Use a link for larger files.');
+        return;
+      }
+      try {
+        var dataUrl = await readFileAsDataUrl(file);
+        if (dataUrl.length > 2800000) {
+          alert('File too large to send in chat (max ~2 MB).');
+          return;
+        }
+        var caption = ($('chatInput') && $('chatInput').value || '').trim();
+        sendChatPayload(caption, {
+          kind: 'file',
+          name: file.name,
+          mime: file.type || 'application/octet-stream',
+          size: file.size,
+          dataUrl: dataUrl,
+        });
+        if ($('chatInput')) $('chatInput').value = '';
+      } catch (err) {
+        alert(err.message || 'Could not read file');
+      }
+    });
+  }
+  if ($('chatPreviewClose')) $('chatPreviewClose').addEventListener('click', closeChatImagePreview);
+  if ($('chatPreviewBackdrop')) $('chatPreviewBackdrop').addEventListener('click', closeChatImagePreview);
+
+  // Apply self color when auth / meeting ready
+  try { applySelfChatColor(); } catch (_) {}
 
   document.querySelectorAll('.emoji-btn').forEach(function (btn) {
     btn.addEventListener('click', function () {
