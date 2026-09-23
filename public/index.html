@@ -477,13 +477,20 @@
   <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.9.1/dist/livekit-client.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.mjs" type="module"></script>
   <script>
-    // pdf.js worker
     window.pdfjsLibReady = import('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.mjs').then(m => {
       m.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.worker.min.mjs';
       window.pdfjsLib = m;
       return m;
     }).catch(() => null);
   </script>
-  <script src="script.js?v=20260923a"></script>
+  <!-- Phase 1 modular client -->
+  <script src="js/lib/events.js?v=20260923p1"></script>
+  <script src="js/features/chat.js?v=20260923p1"></script>
+  <script src="js/features/reactions.js?v=20260923p1"></script>
+  <script src="js/features/schedule.js?v=20260923p1"></script>
+  <script src="js/features/mute.js?v=20260923p1"></script>
+  <script src="js/features/device-icons.js?v=20260923p1"></script>
+  <script src="js/main.js?v=20260923p1"></script>
+  <script src="js/core/app.js?v=20260923p1"></script>
 </body>
 </html>

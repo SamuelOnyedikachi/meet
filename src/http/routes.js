@@ -1,0 +1,695 @@
+const fs = require('fs');
+const path = require('path');
+const { URL } = require('url');
+const bcrypt = require('bcryptjs');
+const db = require('../../db');
+const config = require('../config');
+const { parseBody, sendJSON, isValidEmail, isValidUsername } = require('../lib/http');
+const {
+  getAuthUser,
+  signToken,
+  publicUser,
+  ensureAccountsUser,
+  isInternalUsername,
+} = require('../lib/auth');
+const {
+  meetings,
+  clients,
+  getMeeting,
+  setMeeting,
+  getParticipantsList,
+  getContentState,
+  broadcast,
+  generateCode,
+  normalizeParticipantName,
+  touchMeeting,
+} = require('../rooms/store');
+const { createLiveKitToken, isLiveKitConfigured } = require('../livekit/tokens');
+
+const {
+  PORT,
+  PUBLIC,
+  LIVEKIT_URL,
+  LIVEKIT_API_KEY,
+  LIVEKIT_API_SECRET,
+  ACCOUNTS_URL,
+  ACCOUNTS_JWT_SECRET,
+  MIME,
+} = config;
+
+function createRequestHandler() {
+  return async function handleRequest(req, res) {
+
+  const parsed = new URL(req.url, `http://localhost:${PORT}`);
+  const urlPath = parsed.pathname;
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    });
+    return res.end();
+  }
+
+  if (urlPath === '/health' || urlPath === '/api/health') {
+    return sendJSON(res, 200, {
+      ok: true,
+      livekitConfigured: !!(LIVEKIT_API_KEY && LIVEKIT_API_SECRET && LIVEKIT_URL),
+      db: db.DB_PATH,
+    });
+  }
+
+  // ----- Auth / suite config -----
+  if (urlPath === '/api/config' && req.method === 'GET') {
+    return sendJSON(res, 200, {
+      accountsUrl: ACCOUNTS_URL || null,
+      accountsEnabled: !!(ACCOUNTS_URL || ACCOUNTS_JWT_SECRET),
+      livekitUrl: LIVEKIT_URL || null,
+      livekitConfigured: !!(LIVEKIT_URL && LIVEKIT_API_KEY && LIVEKIT_API_SECRET),
+    });
+  }
+
+  if (urlPath === '/api/accounts/login' && req.method === 'POST') {
+    if (!ACCOUNTS_URL) return sendJSON(res, 503, { error: 'Accounts not configured' });
+    try {
+      const body = await parseBody(req);
+      const email = (body.email || body.login || '').trim();
+      const password = body.password || '';
+      if (!email || !password) return sendJSON(res, 400, { error: 'Email and password required' });
+      const resA = await fetch(ACCOUNTS_URL + '/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await resA.json().catch(() => ({}));
+      if (!resA.ok) {
+        const detail = data.detail || data.error || 'Login failed';
+        return sendJSON(res, resA.status, { error: typeof detail === 'string' ? detail : 'Login failed' });
+      }
+      const access = data.access_token;
+      const u = data.user || {};
+      const linked = ensureAccountsUser({
+        accountsId: String(u.id),
+        email: u.email,
+        username: u.username,
+        displayName: u.display_name || u.username || u.email,
+      });
+      return sendJSON(res, 200, {
+        token: access,
+        user: publicUser({ ...linked, displayName: u.display_name || linked.username }),
+        products: u.products || [],
+      });
+    } catch (e) {
+      console.error('[accounts/login]', e);
+      return sendJSON(res, 502, { error: e.message || 'Accounts unreachable' });
+    }
+  }
+
+  if (urlPath === '/api/accounts/signup' && req.method === 'POST') {
+    if (!ACCOUNTS_URL) return sendJSON(res, 503, { error: 'Accounts not configured' });
+    try {
+      const body = await parseBody(req);
+      const payload = {
+        email: (body.email || '').trim(),
+        password: body.password || '',
+        display_name: (body.display_name || body.username || body.displayName || '').trim(),
+      };
+      if (body.username) payload.username = body.username;
+      if (!payload.email || !payload.password || !payload.display_name) {
+        return sendJSON(res, 400, { error: 'Email, password and name are required' });
+      }
+      const resA = await fetch(ACCOUNTS_URL + '/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await resA.json().catch(() => ({}));
+      if (!resA.ok) {
+        const detail = data.detail || data.error || 'Signup failed';
+        return sendJSON(res, resA.status, { error: typeof detail === 'string' ? detail : 'Signup failed' });
+      }
+      const access = data.access_token;
+      const u = data.user || {};
+      const linked = ensureAccountsUser({
+        accountsId: String(u.id),
+        email: u.email,
+        username: u.username,
+        displayName: u.display_name || u.username || u.email,
+      });
+      return sendJSON(res, 200, {
+        token: access,
+        user: publicUser({ ...linked, displayName: u.display_name || linked.username }),
+        products: u.products || [],
+      });
+    } catch (e) {
+      console.error('[accounts/signup]', e);
+      return sendJSON(res, 502, { error: e.message || 'Accounts unreachable' });
+    }
+  }
+
+  if (urlPath === '/api/signup' && req.method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const username = (body.username || '').trim();
+      const email = (body.email || '').trim().toLowerCase();
+      const password = body.password || '';
+
+      if (!isValidUsername(username)) {
+        return sendJSON(res, 400, { error: 'Username must be 3–24 chars (letters, numbers, underscore)' });
+      }
+      if (!isValidEmail(email)) {
+        return sendJSON(res, 400, { error: 'Invalid email address' });
+      }
+      if (typeof password !== 'string' || password.length < 6) {
+        return sendJSON(res, 400, { error: 'Password must be at least 6 characters' });
+      }
+      if (password.length > 128) {
+        return sendJSON(res, 400, { error: 'Password too long' });
+      }
+
+      if (db.getUserByUsername(username)) {
+        return sendJSON(res, 409, { error: 'Username already taken' });
+      }
+      if (db.getUserByEmail(email)) {
+        return sendJSON(res, 409, { error: 'Email already registered' });
+      }
+
+      const passwordHash = await bcrypt.hash(password, 10);
+      const user = db.createUser({ username, email, passwordHash });
+      const token = signToken(user);
+      return sendJSON(res, 201, { token, user: publicUser(user) });
+    } catch (e) {
+      console.error('[signup]', e);
+      return sendJSON(res, 500, { error: e.message || 'Signup failed' });
+    }
+  }
+
+  if (urlPath === '/api/login' && req.method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const login = (body.login || body.email || body.username || '').trim();
+      const password = body.password || '';
+
+      if (!login || !password) {
+        return sendJSON(res, 400, { error: 'Login and password are required' });
+      }
+
+      // Prefer Collab Accounts when configured (suite SSO)
+      if (ACCOUNTS_URL) {
+        try {
+          const resA = await fetch(ACCOUNTS_URL + '/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ email: login, password }),
+          });
+          const data = await resA.json().catch(() => ({}));
+          if (resA.ok && data.access_token) {
+            const u = data.user || {};
+            const linked = ensureAccountsUser({
+              accountsId: String(u.id),
+              email: u.email,
+              username: u.username,
+              displayName: u.display_name || u.username || u.email,
+            });
+            return sendJSON(res, 200, {
+              token: data.access_token,
+              user: publicUser({ ...linked, displayName: u.display_name || linked.username }),
+              products: u.products || [],
+            });
+          }
+          // If Accounts rejects, fall through to local only when identity is not an email-looking Accounts attempt
+          // Still surface Accounts error for email logins
+          if (login.includes('@')) {
+            const detail = data.detail || data.error || 'Invalid credentials';
+            return sendJSON(res, 401, { error: typeof detail === 'string' ? detail : 'Invalid credentials' });
+          }
+        } catch (e) {
+          console.warn('[login] Accounts unreachable, trying local:', e.message);
+        }
+      }
+
+      const row = db.findUserByLogin(login);
+      if (!row) {
+        return sendJSON(res, 401, { error: 'Invalid credentials' });
+      }
+      const ok = await bcrypt.compare(password, row.password_hash);
+      if (!ok) {
+        return sendJSON(res, 401, { error: 'Invalid credentials' });
+      }
+
+      const user = publicUser(row);
+      const token = signToken(user);
+      return sendJSON(res, 200, { token, user });
+    } catch (e) {
+      console.error('[login]', e);
+      return sendJSON(res, 500, { error: e.message || 'Login failed' });
+    }
+  }
+
+  if (urlPath === '/api/me' && req.method === 'GET') {
+    const user = await getAuthUser(req);
+    if (!user) return sendJSON(res, 401, { error: 'Not authenticated' });
+    return sendJSON(res, 200, { user: publicUser(user) });
+  }
+
+  if (urlPath === '/api/history' && req.method === 'GET') {
+    const user = await getAuthUser(req);
+    if (!user) return sendJSON(res, 401, { error: 'Not authenticated' });
+    const limit = Math.min(100, Math.max(1, parseInt(parsed.searchParams.get('limit') || '50', 10)));
+    const rows = db.getHistoryForUser(user.id, limit);
+    return sendJSON(res, 200, {
+      history: rows.map((r) => ({
+        id: r.id,
+        code: r.code,
+        name: r.name,
+        hostDisplayName: r.host_display_name,
+        createdAt: r.created_at,
+        endedAt: r.ended_at,
+        maxParticipants: r.max_participants,
+        wasHost: !!r.was_host,
+      })),
+    });
+  }
+
+  if (urlPath.startsWith('/api/history/') && req.method === 'GET') {
+    const user = await getAuthUser(req);
+    if (!user) return sendJSON(res, 401, { error: 'Not authenticated' });
+    const id = parseInt(urlPath.split('/').pop(), 10);
+    if (!id) return sendJSON(res, 400, { error: 'Invalid id' });
+    const meeting = db.getMeetingHistoryById(id);
+    if (!meeting) return sendJSON(res, 404, { error: 'Not found' });
+    // Only host or someone who joined can view
+    const participants = db.getMeetingParticipantsLog(id);
+    const allowed =
+      meeting.host_user_id === user.id ||
+      participants.some((p) => p.user_id === user.id);
+    if (!allowed) return sendJSON(res, 403, { error: 'Forbidden' });
+    return sendJSON(res, 200, {
+      meeting: {
+        id: meeting.id,
+        code: meeting.code,
+        name: meeting.name,
+        hostDisplayName: meeting.host_display_name,
+        createdAt: meeting.created_at,
+        endedAt: meeting.ended_at,
+        maxParticipants: meeting.max_participants,
+      },
+      participants: participants.map((p) => ({
+        displayName: p.display_name,
+        userId: p.user_id,
+        joinedAt: p.joined_at,
+        leftAt: p.left_at,
+      })),
+    });
+  }
+
+  // LiveKit token
+  if (urlPath === '/api/livekit-token' && req.method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const code = (body.code || '').toUpperCase();
+      const participantId = body.participantId;
+
+      if (!code || !participantId) {
+        return sendJSON(res, 400, { error: 'code and participantId are required' });
+      }
+
+      const meeting = meetings.get(code);
+      if (!meeting) return sendJSON(res, 404, { error: 'Meeting not found' });
+      const participant = meeting.participants.get(participantId);
+      if (!participant) {
+        return sendJSON(res, 403, { error: 'Not a participant of this meeting' });
+      }
+
+      const participantName = normalizeParticipantName(body.participantName)
+        || participant.name
+        || 'Participant';
+
+      const token = await createLiveKitToken(participantId, participantName, code);
+      return sendJSON(res, 200, { token, url: LIVEKIT_URL, room: code });
+    } catch (e) {
+      console.error('[livekit-token]', e.message);
+      return sendJSON(res, 500, { error: e.message || 'Failed to create token' });
+    }
+  }
+
+  if (urlPath === '/api/create' && req.method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const name = (body.name || '').trim();
+      if (!name || name.length < 2) return sendJSON(res, 400, { error: 'Meeting name must be at least 2 characters' });
+      if (name.length > 60) return sendJSON(res, 400, { error: 'Meeting name too long' });
+
+      const authUser = await getAuthUser(req);
+      const code = generateCode();
+      const hostId = body.participantId || 'host-' + Date.now();
+      const hostName = normalizeParticipantName(
+        body.participantName
+        || authUser?.displayName
+        || (!authUser?.username || isInternalUsername(authUser.username) ? null : authUser.username)
+        || (authUser?.email && authUser.email.split('@')[0])
+      );
+      if (!hostName) {
+        return sendJSON(res, 400, { error: 'Please enter your display name' });
+      }
+
+      const historyId = db.startMeetingHistory({
+        code,
+        name,
+        hostUserId: authUser ? authUser.id : null,
+        hostDisplayName: hostName,
+      });
+
+      db.logParticipantJoin({
+        meetingHistoryId: historyId,
+        userId: authUser ? authUser.id : null,
+        displayName: hostName,
+        participantId: hostId,
+      });
+
+      const participants = new Map();
+      participants.set(hostId, {
+        id: hostId,
+        name: hostName,
+        isHost: true,
+        sharing: false,
+        userId: authUser ? authUser.id : null,
+        device: body.device || 'desktop',
+        mutedByHost: false,
+      });
+
+      const now = Date.now();
+      meetings.set(code, {
+        name,
+        hostId,
+        hostUserId: authUser ? authUser.id : null,
+        historyId,
+        createdAt: now,
+        lastActivity: now,
+        participants,
+        content: null,
+        chatHistory: [],
+        scheduledId: body.scheduledId || null,
+      });
+
+      if (body.scheduledId) {
+        try {
+          db.updateScheduledStatus(body.scheduledId, 'live', {
+            startedAt: new Date().toISOString(),
+          });
+        } catch (_) {}
+      }
+
+      return sendJSON(res, 200, {
+        code,
+        letters: code.slice(0, 3),
+        numbers: code.slice(3),
+        name,
+        hostId,
+        participantId: hostId,
+        participants: getParticipantsList(meetings.get(code)),
+        content: null,
+      });
+    } catch (e) {
+      console.error('[create]', e);
+      return sendJSON(res, 400, { error: e.message || 'Bad request' });
+    }
+  }
+
+  if (urlPath === '/api/join' && req.method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      let letters = (body.letters || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3);
+      let numbers = (body.numbers || '').replace(/\D/g, '').slice(0, 3);
+      // Also accept full code: "ABC123" or "ABC-123"
+      if ((!letters || !numbers) && body.code) {
+        const raw = String(body.code).toUpperCase().replace(/[^A-Z0-9]/g, '');
+        letters = raw.slice(0, 3).replace(/[^A-Z]/g, '');
+        numbers = raw.slice(3).replace(/\D/g, '').slice(0, 3);
+      }
+      const code = letters + numbers;
+
+      if (letters.length !== 3 || numbers.length !== 3) {
+        return sendJSON(res, 400, { error: 'Enter 3 letters and 3 numbers' });
+      }
+
+      const meeting = meetings.get(code);
+      if (!meeting) return sendJSON(res, 404, { error: 'Meeting not found. Check the code.' });
+      if (meeting.participants.size >= 20) {
+        return sendJSON(res, 403, { error: 'Meeting is full (max 20)' });
+      }
+
+      const authUser = await getAuthUser(req);
+      const participantId = body.participantId || 'user-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
+      const participantName = normalizeParticipantName(
+        body.participantName
+        || authUser?.displayName
+        || (!authUser?.username || isInternalUsername(authUser.username) ? null : authUser.username)
+        || (authUser?.email && authUser.email.split('@')[0])
+      );
+      if (!participantName) {
+        return sendJSON(res, 400, { error: 'Please enter your display name' });
+      }
+
+      if (!meeting.participants.has(participantId)) {
+        meeting.participants.set(participantId, {
+          id: participantId,
+          name: participantName,
+          isHost: false,
+          sharing: false,
+          userId: authUser ? authUser.id : null,
+          device: body.device || 'desktop',
+          mutedByHost: false,
+        });
+
+        if (meeting.historyId) {
+          db.logParticipantJoin({
+            meetingHistoryId: meeting.historyId,
+            userId: authUser ? authUser.id : null,
+            displayName: participantName,
+            participantId,
+          });
+          db.updateMaxParticipants(meeting.historyId, meeting.participants.size);
+        }
+      } else {
+        const existing = meeting.participants.get(participantId);
+        if (existing) {
+          existing.name = participantName;
+          if (body.device) existing.device = body.device;
+        }
+      }
+
+      meeting.lastActivity = Date.now();
+
+      broadcast(code, {
+        type: 'participant-joined',
+        participantId,
+        participants: getParticipantsList(meeting),
+      }, participantId);
+
+      return sendJSON(res, 200, {
+        code,
+        letters: code.slice(0, 3),
+        numbers: code.slice(3),
+        name: meeting.name,
+        participantId,
+        participants: getParticipantsList(meeting),
+        content: getContentState(meeting),
+      });
+    } catch (e) {
+      return sendJSON(res, 400, { error: e.message || 'Bad request' });
+    }
+  }
+
+  if (urlPath.startsWith('/api/meeting/') && req.method === 'GET') {
+    const code = urlPath.split('/').pop().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const meeting = meetings.get(code);
+    if (!meeting) return sendJSON(res, 404, { error: 'Meeting not found' });
+    meeting.lastActivity = Date.now();
+    return sendJSON(res, 200, {
+      code,
+      letters: code.slice(0, 3),
+      numbers: code.slice(3),
+      name: meeting.name,
+      participants: getParticipantsList(meeting),
+      createdAt: meeting.createdAt,
+      content: getContentState(meeting),
+    });
+  }
+
+  // ----- Schedule APIs (logged-in) -----
+  if (urlPath === '/api/schedule' && req.method === 'POST') {
+    try {
+      const authUser = await getAuthUser(req);
+      if (!authUser || !authUser.id) return sendJSON(res, 401, { error: 'Login required to schedule' });
+      const body = await parseBody(req);
+      const name = String(body.name || 'Scheduled meeting').trim().slice(0, 80) || 'Scheduled meeting';
+      const scheduledStart = body.scheduledStart || body.start;
+      if (!scheduledStart) return sendJSON(res, 400, { error: 'scheduledStart required (ISO datetime)' });
+      const startDate = new Date(scheduledStart);
+      if (Number.isNaN(startDate.getTime())) return sendJSON(res, 400, { error: 'Invalid scheduledStart' });
+      let scheduledEnd = body.scheduledEnd || body.end || null;
+      if (scheduledEnd) {
+        const endDate = new Date(scheduledEnd);
+        if (Number.isNaN(endDate.getTime())) scheduledEnd = null;
+        else scheduledEnd = endDate.toISOString();
+      }
+      const code = generateCode();
+      const row = db.createScheduledMeeting({
+        code,
+        name,
+        hostUserId: authUser.id,
+        hostDisplayName: authUser.displayName || authUser.username || null,
+        scheduledStart: startDate.toISOString(),
+        scheduledEnd,
+      });
+      return sendJSON(res, 201, {
+        id: row.id,
+        code: row.code,
+        name: row.name,
+        scheduledStart: row.scheduled_start,
+        scheduledEnd: row.scheduled_end,
+        status: row.status,
+        link: `/${row.code.slice(0, 3)}-${row.code.slice(3)}`,
+      });
+    } catch (e) {
+      console.error('[schedule]', e);
+      return sendJSON(res, 400, { error: e.message || 'Bad request' });
+    }
+  }
+
+  if (urlPath === '/api/schedule' && req.method === 'GET') {
+    try {
+      const authUser = await getAuthUser(req);
+      if (!authUser || !authUser.id) return sendJSON(res, 401, { error: 'Login required' });
+      const rows = db.getScheduledForUser(authUser.id, 50);
+      return sendJSON(res, 200, {
+        meetings: rows.map((r) => ({
+          id: r.id,
+          code: r.code,
+          name: r.name,
+          scheduledStart: r.scheduled_start,
+          scheduledEnd: r.scheduled_end,
+          status: r.status,
+          createdAt: r.created_at,
+          startedAt: r.started_at,
+          endedAt: r.ended_at,
+          link: `/${r.code.slice(0, 3)}-${r.code.slice(3)}`,
+          isLive: meetings.has(r.code),
+        })),
+      });
+    } catch (e) {
+      return sendJSON(res, 500, { error: e.message || 'Failed' });
+    }
+  }
+
+  if (urlPath.startsWith('/api/schedule/') && req.method === 'DELETE') {
+    try {
+      const authUser = await getAuthUser(req);
+      if (!authUser || !authUser.id) return sendJSON(res, 401, { error: 'Login required' });
+      const id = parseInt(urlPath.split('/').pop(), 10);
+      if (!id) return sendJSON(res, 400, { error: 'Invalid id' });
+      db.deleteScheduled(id, authUser.id);
+      return sendJSON(res, 200, { ok: true });
+    } catch (e) {
+      return sendJSON(res, 400, { error: e.message || 'Bad request' });
+    }
+  }
+
+  if (urlPath === '/api/schedule/start' && req.method === 'POST') {
+    try {
+      const authUser = await getAuthUser(req);
+      if (!authUser || !authUser.id) return sendJSON(res, 401, { error: 'Login required' });
+      const body = await parseBody(req);
+      const id = body.id;
+      const row = db.getScheduledById(id);
+      if (!row || row.host_user_id !== authUser.id) {
+        return sendJSON(res, 404, { error: 'Scheduled meeting not found' });
+      }
+      return sendJSON(res, 200, {
+        code: row.code,
+        name: row.name,
+        scheduledId: row.id,
+      });
+    } catch (e) {
+      return sendJSON(res, 400, { error: e.message || 'Bad request' });
+    }
+  }
+
+  if (urlPath === '/api/leave' && req.method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const code = (body.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const participantId = body.participantId;
+      const meeting = meetings.get(code);
+      if (meeting && participantId) {
+        meeting.participants.delete(participantId);
+        clients.delete(participantId);
+        meeting.lastActivity = Date.now();
+
+        if (meeting.historyId) {
+          db.logParticipantLeave({
+            meetingHistoryId: meeting.historyId,
+            participantId,
+          });
+        }
+
+        if (meeting.participants.size === 0) {
+          endMeeting(code, 'empty');
+        } else {
+          broadcast(code, {
+            type: 'participant-left',
+            participantId,
+            participants: getParticipantsList(meeting),
+          });
+        }
+      }
+      return sendJSON(res, 200, { ok: true });
+    } catch {
+      return sendJSON(res, 400, { error: 'Bad request' });
+    }
+  }
+
+  // Static files
+  let staticPath = urlPath === '/' ? '/index.html' : urlPath;
+  const filePath = path.join(PUBLIC, path.normalize(staticPath).replace(/^(\.\.[/\\])+/, ''));
+
+  if (!filePath.startsWith(PUBLIC)) {
+    res.writeHead(403);
+    return res.end('Forbidden');
+  }
+
+  fs.readFile(filePath, (err, data) => {
+    if (err) {
+      if (err.code === 'ENOENT') {
+        fs.readFile(path.join(PUBLIC, 'index.html'), (e2, html) => {
+          if (e2) { res.writeHead(404); return res.end('Not found'); }
+          res.writeHead(200, {
+            'Content-Type': 'text/html; charset=utf-8',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+          });
+          res.end(html);
+        });
+        return;
+      }
+      res.writeHead(500);
+      return res.end('Server error');
+    }
+    const ext = path.extname(filePath).toLowerCase();
+    const type = MIME[ext] || 'application/octet-stream';
+    // HTML always revalidate; hashed/query-busted assets can be short-cached
+    const cache =
+      ext === '.html' || staticPath === '/index.html'
+        ? 'no-cache, no-store, must-revalidate'
+        : 'public, max-age=60, must-revalidate';
+    res.writeHead(200, {
+      'Content-Type': type,
+      'Cache-Control': cache,
+    });
+    res.end(data);
+  });
+  };
+}
+
+module.exports = { createRequestHandler };

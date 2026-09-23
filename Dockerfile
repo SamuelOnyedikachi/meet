@@ -10,6 +10,7 @@ COPY package.json ./
 RUN npm install --omit=dev
 
 COPY server.js db.js ./
+COPY src ./src
 COPY public ./public
 
 RUN mkdir -p /app/data
