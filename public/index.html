@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link rel="stylesheet" href="styles.css?v=20260923chat">
+  <link rel="stylesheet" href="styles.css?v=20260923q2">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤝</text></svg>">
 </head>
 <body>
@@ -386,7 +386,23 @@
                 <i class="fa-solid fa-desktop"></i>
                 <span>Share screen</span>
               </button>
-<button id="micBtn" class="btn call-btn" title="Toggle microphone">
+              <label class="quality-control send-quality" title="Your outgoing screen quality">
+                <span class="quality-label">Send</span>
+                <select id="sendQualitySelect" aria-label="Send screen quality">
+                  <option value="high" selected>High</option>
+                  <option value="medium">Medium</option>
+                  <option value="low">Low</option>
+                </select>
+              </label>
+              <label class="quality-control view-quality" title="How you view others' screens (audio stays on)">
+                <span class="quality-label">View</span>
+                <select id="viewQualitySelect" aria-label="View screen quality">
+                  <option value="high" selected>High</option>
+                  <option value="medium">Medium</option>
+                  <option value="off">Audio only</option>
+                </select>
+              </label>
+              <button id="micBtn" class="btn call-btn" title="Toggle microphone">
                 <i class="fa-solid fa-microphone"></i>
                 <span>Mic</span>
               </button>
@@ -513,6 +529,6 @@
   <script src="js/features/mute.js?v=20260923p2"></script>
   <script src="js/features/device-icons.js?v=20260923p2"></script>
   <script src="js/main.js?v=20260923p2"></script>
-  <script src="js/core/app.js?v=20260923chat"></script>
+  <script src="js/core/app.js?v=20260923q2"></script>
 </body>
 </html>

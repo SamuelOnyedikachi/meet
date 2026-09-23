@@ -734,9 +734,9 @@
         audioPreset: LK.AudioPresets?.speech || undefined,
         dtx: true,
         red: true,
-        // ~6 Mbps @ 30fps holds 1080p motion much better than 2.5 Mbps @ 24fps
+        // High ceiling; actual bitrate chosen by send quality (high/medium/low)
         screenShareEncoding: {
-          maxBitrate: 6_000_000,
+          maxBitrate: 10_000_000,
           maxFramerate: 30,
         },
         videoEncoding: {
@@ -965,12 +965,7 @@
         dimensions: track.dimensions,
       });
       try {
-        if (publication.setVideoQuality && LK.VideoQuality) {
-          publication.setVideoQuality(LK.VideoQuality.HIGH);
-        }
-        if (typeof publication.setSubscribed === 'function' && !publication.isSubscribed) {
-          publication.setSubscribed(true);
-        }
+        applyViewQualityToPublication(publication);
       } catch (_) {}
       const p = participants.find(x => x.id === identity);
       if (p && !p.sharing) { p.sharing = true; renderCards(); }
@@ -1158,17 +1153,100 @@
     renderCards();
   }
 
+  // Sender encode presets (highest available path = high)
+  const SEND_QUALITY = {
+    high: {
+      maxBitrate: 10_000_000,
+      maxFramerate: 30,
+      resolution: { width: 1920, height: 1080, frameRate: 30 },
+    },
+    medium: {
+      maxBitrate: 4_000_000,
+      maxFramerate: 24,
+      resolution: { width: 1280, height: 720, frameRate: 24 },
+    },
+    low: {
+      maxBitrate: 1_500_000,
+      maxFramerate: 15,
+      resolution: { width: 960, height: 540, frameRate: 15 },
+    },
+  };
+  let sendQuality = localStorage.getItem('meet-send-quality') || 'high';
+  if (!SEND_QUALITY[sendQuality]) sendQuality = 'high';
+  let viewQuality = localStorage.getItem('meet-view-quality') || 'high';
+  if (!['high', 'medium', 'off'].includes(viewQuality)) viewQuality = 'high';
+
+  function getSendPreset() {
+    return SEND_QUALITY[sendQuality] || SEND_QUALITY.high;
+  }
+
+  function applyViewQualityToPublication(publication) {
+    if (!publication) return;
+    try {
+      if (viewQuality === 'off') {
+        if (typeof publication.setSubscribed === 'function') publication.setSubscribed(false);
+        return;
+      }
+      if (typeof publication.setSubscribed === 'function' && !publication.isSubscribed) {
+        publication.setSubscribed(true);
+      }
+      if (publication.setVideoQuality && LK.VideoQuality) {
+        publication.setVideoQuality(
+          viewQuality === 'medium' ? LK.VideoQuality.MEDIUM : LK.VideoQuality.HIGH
+        );
+      }
+    } catch (_) {}
+  }
+
+  function applyViewQualityAll() {
+    const big = $('bigView');
+    if (big) {
+      big.classList.toggle('view-audio-only', viewQuality === 'off');
+      if (viewQuality === 'off') {
+        const ph = $('bigPlaceholder');
+        if (ph) {
+          ph.classList.remove('hidden');
+          const p = ph.querySelector('p');
+          if (p) p.textContent = 'Audio only — screen hidden';
+          const sub = ph.querySelector('.sub');
+          if (sub) sub.textContent = 'Sound still plays; pick High/Medium under View to show video';
+        }
+      }
+    }
+    if (!room) return;
+    room.remoteParticipants.forEach((participant) => {
+      participant.trackPublications.forEach((publication) => {
+        if (publication.source === LK.Track.Source.ScreenShare) {
+          applyViewQualityToPublication(publication);
+        }
+      });
+    });
+    // Re-attach current watch if video turned back on
+    if (viewQuality !== 'off' && watchingId) {
+      const m = remoteMedia[watchingId];
+      if (m && m.screenTrack) attachScreenToBigView(m.screenTrack, watchingId);
+    }
+  }
+
+  async function republishScreenWithQuality() {
+    if (!isSharing || !room?.localParticipant) return;
+    try {
+      await room.localParticipant.setScreenShareEnabled(false);
+    } catch (_) {}
+    // brief yield so unpublish settles
+    await new Promise((r) => setTimeout(r, 200));
+    await startShare();
+  }
+
   async function startShare() {
     if (!room?.localParticipant) { alert('Not connected to media server yet.'); return; }
+    const preset = getSendPreset();
     try {
-      // createScreenTracks gives us the MediaStreamTrack so we can log + set contentHint
-      // before publish. Falls back to setScreenShareEnabled if createScreenTracks is unavailable.
-      // contentHint "motion" = encoder prioritizes smooth video (YouTube, demos)
-      // "detail" is better for static slides/docs — motion is the common case in calls
+      // motion + high bitrate keeps YouTube clearer while playing (not only when paused)
       if (typeof room.localParticipant.createScreenTracks === 'function') {
         const tracks = await room.localParticipant.createScreenTracks({
           audio: true,
-          resolution: { width: 1920, height: 1080, frameRate: 30 },
+          resolution: preset.resolution,
           contentHint: 'motion',
         });
         for (const track of tracks) {
@@ -1177,18 +1255,17 @@
           }
           console.log('[LiveKit] publishing screen track', {
             kind: track.kind,
-            source: track.source,
-            id: track.mediaStreamTrack?.id,
-            readyState: track.mediaStreamTrack?.readyState,
-            label: track.mediaStreamTrack?.label,
+            sendQuality,
+            maxBitrate: preset.maxBitrate,
+            maxFramerate: preset.maxFramerate,
           });
           await room.localParticipant.publishTrack(track, {
             source: track.kind === 'video' ? LK.Track.Source.ScreenShare : LK.Track.Source.ScreenShareAudio,
             videoCodec: 'vp8',
             simulcast: false,
             videoEncoding: {
-              maxBitrate: 6_000_000,
-              maxFramerate: 30,
+              maxBitrate: preset.maxBitrate,
+              maxFramerate: preset.maxFramerate,
             },
             degradationPreference: 'maintain-resolution',
           });
@@ -1196,7 +1273,7 @@
       } else {
         await room.localParticipant.setScreenShareEnabled(true, {
           audio: true,
-          resolution: { width: 1920, height: 1080, frameRate: 30 },
+          resolution: preset.resolution,
           contentHint: 'motion',
         });
       }
@@ -1636,6 +1713,34 @@
     else await startShare();
   });
 
+  // Screen quality controls (send = encode, view = subscribe / hide video)
+  (function initQualityControls() {
+    var sendSel = $('sendQualitySelect');
+    var viewSel = $('viewQualitySelect');
+    if (sendSel) {
+      sendSel.value = sendQuality;
+      sendSel.addEventListener('change', async function () {
+        sendQuality = sendSel.value;
+        if (!SEND_QUALITY[sendQuality]) sendQuality = 'high';
+        try { localStorage.setItem('meet-send-quality', sendQuality); } catch (_) {}
+        if (isSharing) {
+          await republishScreenWithQuality();
+        }
+      });
+    }
+    if (viewSel) {
+      viewSel.value = viewQuality;
+      viewSel.addEventListener('change', function () {
+        viewQuality = viewSel.value;
+        if (!['high', 'medium', 'off'].includes(viewQuality)) viewQuality = 'high';
+        try { localStorage.setItem('meet-view-quality', viewQuality); } catch (_) {}
+        applyViewQualityAll();
+      });
+    }
+    applyViewQualityAll();
+  })();
+
+
   screenFsBtn?.addEventListener('click', () => {
     if (!document.fullscreenElement) bigView?.requestFullscreen?.();
     else document.exitFullscreen?.();
@@ -1918,16 +2023,17 @@
         return '<a class="chat-link" href="' + escapeHtml(href) + '" target="_blank" rel="noopener noreferrer">' + m + '</a>';
       }
     );
-    // @Name mentions
+    // @mentions: only the @Name token (no bold bleed into following words)
     if (mentions && mentions.length) {
       mentions.forEach(function (mn) {
-        var name = mn.name || '';
+        var name = String(mn.name || '').trim();
         if (!name) return;
-        var re = new RegExp('@' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'gi');
+        var re = new RegExp('@' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![\\w-])', 'gi');
         escaped = escaped.replace(re, '<span class="chat-mention">@' + escapeHtml(name) + '</span>');
       });
     } else {
-      escaped = escaped.replace(/@([A-Za-z0-9_.\- ]{1,40})/g, '<span class="chat-mention">@$1</span>');
+      // single token only — no spaces (avoids bolding the rest of the sentence)
+      escaped = escaped.replace(/@([A-Za-z0-9_.-]{1,40})/g, '<span class="chat-mention">@$1</span>');
     }
     return escaped;
   }

@@ -1791,11 +1791,12 @@ body.dark .history-card {
   border-radius: 12px;
   background: rgba(128, 128, 128, 0.1);
   align-self: flex-start;
+  border: none;
 }
 .chat-msg-row.is-me {
   align-self: flex-end;
-  background: color-mix(in srgb, var(--chat-self-color, #4f8cff) 18%, transparent);
-  border: 1px solid color-mix(in srgb, var(--chat-self-color, #4f8cff) 35%, transparent);
+  background: color-mix(in srgb, var(--chat-self-color, #4f8cff) 10%, transparent);
+  border: none;
 }
 .chat-msg-row .chat-who {
   font-size: 0.72rem;
@@ -1823,10 +1824,9 @@ body.dark .history-card {
 }
 .chat-mention {
   color: var(--accent, #4f8cff);
-  font-weight: 700;
-  background: color-mix(in srgb, var(--accent, #4f8cff) 15%, transparent);
-  border-radius: 4px;
-  padding: 0 3px;
+  font-weight: 500;
+  background: none;
+  padding: 0;
 }
 .chat-attach {
   margin-top: 6px;
@@ -1943,4 +1943,39 @@ body.dark .history-card {
 .user-label {
   color: var(--chat-self-color, #4f8cff);
   font-weight: 600;
+}
+
+.quality-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.75rem;
+  opacity: 0.95;
+}
+.quality-control .quality-label {
+  font-weight: 600;
+  opacity: 0.7;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.quality-control select {
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border, rgba(128,128,128,.3));
+  background: var(--input-bg, transparent);
+  color: inherit;
+  font-size: 0.8rem;
+  max-width: 7.5rem;
+}
+.big-view.view-audio-only #lkScreenVideo,
+.big-view.view-audio-only .content-view {
+  opacity: 0 !important;
+  pointer-events: none;
+}
+.big-view.view-audio-only #bigPlaceholder {
+  display: flex !important;
+}
+@media (max-width: 768px) {
+  .quality-control .quality-label { display: none; }
+  .quality-control select { max-width: 5.5rem; font-size: 0.72rem; }
 }
