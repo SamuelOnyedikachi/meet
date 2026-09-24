@@ -2196,7 +2196,7 @@ html.dark .mention-menu,
   to { opacity: 1; transform: none; }
 }
 
-/* Chat overlay on screen */
+/* Chat overlay on screen — only visible while the stage is in fullscreen */
 .chat-overlay-btn {
   position: absolute;
   top: 10px;
@@ -2204,6 +2204,17 @@ html.dark .mention-menu,
   z-index: 6;
   background: rgba(0,0,0,.45) !important;
   color: #fff !important;
+  display: none !important;
+}
+.big-view:fullscreen .chat-overlay-btn,
+.big-view:-webkit-full-screen .chat-overlay-btn,
+html:fullscreen .chat-overlay-btn,
+html:-webkit-full-screen .chat-overlay-btn {
+  display: inline-flex !important;
+}
+/* When document is fullscreen via bigView, show chat icon */
+body.stage-fullscreen .chat-overlay-btn {
+  display: inline-flex !important;
 }
 .chat-screen-overlay {
   position: absolute;
@@ -3650,7 +3661,7 @@ body.dark #meetingView {
 .participant-item:hover { background: var(--surface-soft); }
 .participant-item.me {
   background: linear-gradient(90deg, var(--primary-soft), transparent);
-  box-shadow: inset 3px 0 0 var(--primary);
+  /* no left border / inset accent on "you" */
 }
 .participant-more { border-radius: 9px !important; }
 .side-chat {
@@ -3677,14 +3688,18 @@ body.dark #meetingView {
   gap: 10px;
 }
 #meetingView .meeting-title-bar {
-  min-height: 42px;
-  padding: 0 2px;
+  min-height: 0;
+  padding: 0;
   flex-wrap: nowrap;
+  /* name / share / end moved to topbar — only recording badge remains */
 }
-#meetingView .meeting-name-label {
-  font-size: 1rem;
-  font-weight: 700;
-  letter-spacing: -.02em;
+#meetingView .meeting-title-bar:not(:has(.recording-badge:not(.hidden))) {
+  display: none;
+}
+#meetingView .meeting-name-label,
+#meetingView #shareLinkBtn,
+#meetingView #endMeetBtn {
+  display: none !important;
 }
 #meetingView .meeting-title-bar .small-btn {
   height: 34px;

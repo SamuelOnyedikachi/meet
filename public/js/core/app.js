@@ -2078,6 +2078,24 @@
     else document.exitFullscreen?.();
   });
 
+  // Show chat-on-screen icon only while the stage (or document) is in fullscreen
+  function syncStageFullscreenChatBtn() {
+    const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+    const onStage = !!(fsEl && (fsEl === bigView || (bigView && bigView.contains(fsEl)) || fsEl === document.documentElement));
+    document.body.classList.toggle('stage-fullscreen', !!fsEl && onStage);
+    const btn = $('chatOverlayBtn');
+    if (btn && !fsEl) {
+      // Leaving fullscreen: close overlay and clear pressed state
+      const overlay = $('chatScreenOverlay');
+      if (overlay && !overlay.classList.contains('hidden')) {
+        overlay.classList.add('hidden');
+        btn.setAttribute('aria-pressed', 'false');
+      }
+    }
+  }
+  document.addEventListener('fullscreenchange', syncStageFullscreenChatBtn);
+  document.addEventListener('webkitfullscreenchange', syncStageFullscreenChatBtn);
+
   createBtn?.addEventListener('click', async () => {
     hideError(createError);
     const name = (createName?.value || '').trim();

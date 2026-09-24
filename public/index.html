@@ -48,9 +48,6 @@
         <button id="themeToggle" class="btn icon-btn desktop-only" title="Toggle day / night">
           <i class="fa-solid fa-moon"></i>
         </button>
-        <button id="fullscreenBtn" class="btn icon-btn desktop-only" title="Toggle app fullscreen">
-          <i class="fa-solid fa-expand"></i>
-        </button>
         <div class="more-menu-wrap mobile-only">
           <button id="moreMenuBtn" class="btn icon-btn" title="More" aria-haspopup="true" aria-expanded="false">
             <i class="fa-solid fa-ellipsis-vertical"></i>
@@ -67,9 +64,6 @@
             </button>
             <button type="button" class="more-item" data-action="theme" role="menuitem">
               <i class="fa-solid fa-moon"></i> Theme
-            </button>
-            <button type="button" class="more-item" data-action="fullscreen" role="menuitem">
-              <i class="fa-solid fa-expand"></i> Fullscreen
             </button>
             <button type="button" class="more-item more-history hidden" data-action="history" role="menuitem">
               <i class="fa-solid fa-clock-rotate-left"></i> History
@@ -408,12 +402,12 @@
         <div class="panel">
           <div class="content meeting-content">
             <div class="meeting-title-bar">
-              <span id="meetingNameLabel" class="meeting-name-label"></span>
+              <span id="meetingNameLabel" class="meeting-name-label hidden"></span>
               <span id="recordingBadge" class="recording-badge hidden"><span class="rec-dot"></span> Recording <span id="recordingTimer"></span></span>
-              <button id="shareLinkBtn" class="btn small-btn" title="Copy invite link">
+              <button id="shareLinkBtn" class="btn small-btn hidden" title="Copy invite link" aria-hidden="true">
                 <i class="fa-solid fa-link"></i> Share
               </button>
-              <button id="endMeetBtn" class="btn small-btn danger-btn hidden" title="End meeting for everyone">
+              <button id="endMeetBtn" class="btn small-btn danger-btn hidden" title="End meeting for everyone" aria-hidden="true">
                 <i class="fa-solid fa-phone-slash"></i> End
               </button>
             </div>
@@ -616,7 +610,7 @@
     </div>
 
     <footer class="footer">
-      <span>Meet · LiveKit media</span>
+      <span>Meeting the CisTech way...</span>
     </footer>
   </div>
 
