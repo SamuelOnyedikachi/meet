@@ -1,7 +1,3 @@
-/**
- * Feature flags — set via env FEATURE_<ID>=0 to disable.
- * Example: FEATURE_CHAT=0 FEATURE_SCHEDULE=0
- */
 function envFlag(name, defaultOn = true) {
   const v = process.env[name];
   if (v === undefined || v === '') return defaultOn;
@@ -14,7 +10,14 @@ const features = {
   mute: envFlag('FEATURE_MUTE', true),
   deviceIcons: envFlag('FEATURE_DEVICE_ICONS', true),
   schedule: envFlag('FEATURE_SCHEDULE', true),
-  content: envFlag('FEATURE_CONTENT', false), // UI removed; handlers optional
+  content: envFlag('FEATURE_CONTENT', false),
+  moderation: envFlag('FEATURE_MODERATION', true),
+  waitingRoom: envFlag('FEATURE_WAITING_ROOM', true),
+  raisedHand: envFlag('FEATURE_RAISED_HAND', true),
+  activity: envFlag('FEATURE_ACTIVITY', true),
+  recording: envFlag('FEATURE_RECORDING', true),
+  templates: envFlag('FEATURE_TEMPLATES', true),
+  diagnostics: envFlag('FEATURE_DIAGNOSTICS', true),
 };
 
 module.exports = { features };

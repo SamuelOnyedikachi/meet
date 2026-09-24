@@ -573,6 +573,7 @@
     socket.onmessage = (ev) => {
       let msg;
       try { msg = JSON.parse(ev.data); } catch { return; }
+      if (window.__meetPhase2OnMsg) { try { window.__meetPhase2OnMsg(msg); } catch (_) {} }
       if (msg.type === 'meeting-ended') {
         // Server closed the room (empty or 12h inactivity)
         stopPolling();
@@ -593,16 +594,91 @@
         return;
       }
       if (msg.type === 'participants' || msg.type === 'participant-joined' ||
-          msg.type === 'participant-left' || msg.type === 'share-started' || msg.type === 'share-stopped') {
-        participants = msg.participants || [];
-        // LiveKit is source of truth for who is actually publishing screen —
-        // merge so late joiners still see cards even if WS sharing flag was missed
+          msg.type === 'participant-left' || msg.type === 'share-started' || msg.type === 'share-stopped' ||
+          msg.type === 'participant-removed' || msg.type === 'role-changed' || msg.type === 'host-transferred') {
+        if (msg.participants) participants = msg.participants;
+        if (msg.waiting) waitingList = msg.waiting;
+        if (msg.raisedHands) raisedHands = msg.raisedHands;
+        if (msg.security) securityState = msg.security;
+        // Update my role/permissions from roster
+        if (currentMeeting && currentMeeting.participantId) {
+          const me = participants.find((p) => p.id === currentMeeting.participantId);
+          if (me) {
+            myRole = me.role || myRole;
+            if (me.permissions) myPermissions = me.permissions;
+          }
+        }
         try { syncSharingFlagsFromLiveKit(); } catch (_) {
           renderParticipants();
           renderCards();
         }
-        if ((msg.type === 'participant-left' || msg.type === 'share-stopped') && watchingId === msg.participantId) {
+        if ((msg.type === 'participant-left' || msg.type === 'share-stopped' || msg.type === 'participant-removed') && watchingId === msg.participantId) {
           clearBigView();
+        }
+        return;
+      }
+      if (msg.type === 'waiting-request' || msg.type === 'waiting-updated') {
+        if (msg.waiting) waitingList = msg.waiting;
+        renderParticipants();
+        if (msg.type === 'waiting-request' && msg.participant) {
+          showToast((msg.participant.name || 'Someone') + ' wants to join');
+        }
+        return;
+      }
+      if (msg.type === 'hand-raised' || msg.type === 'hand-lowered' || msg.type === 'hands-cleared') {
+        if (msg.raisedHands) raisedHands = msg.raisedHands;
+        if (msg.type === 'hand-lowered' && msg.participantId === currentMeeting?.participantId) {
+          handRaised = false;
+          const rb = document.getElementById('raiseHandBtn');
+          if (rb) { rb.classList.remove('active'); rb.setAttribute('aria-pressed', 'false'); }
+        }
+        renderParticipants();
+        return;
+      }
+      if (msg.type === 'ask-unmute') {
+        showToast((msg.byName || 'Host') + ' is asking you to unmute.', [
+          { label: 'Unmute', onClick: function () {
+            try { if (!micEnabled) toggleMic(); } catch (_) {}
+            sendWS({ type: 'unmute-self' });
+          }},
+          { label: 'Dismiss', onClick: function () {} },
+        ]);
+        return;
+      }
+      if (msg.type === 'removed' || msg.type === 'declined') {
+        alert(msg.type === 'removed' ? 'You were removed from the meeting.' : 'The host declined your request to join.');
+        try { leaveMeeting(); } catch (_) { location.href = '/'; }
+        return;
+      }
+      if (msg.type === 'admitted') {
+        hideWaitingRoom();
+        if (msg.participants) participants = msg.participants;
+        showToast('You were admitted to the meeting');
+        // Enter meeting UI if we were waiting
+        try {
+          if (typeof enterMeetingUI === 'function') enterMeetingUI();
+          else {
+            document.getElementById('waitingView')?.classList.add('hidden');
+            document.getElementById('meetingView')?.classList.remove('hidden');
+            document.getElementById('homeView')?.classList.add('hidden');
+          }
+          connectWS();
+          connectLiveKit();
+        } catch (e) { console.warn(e); }
+        renderParticipants();
+        return;
+      }
+      if (msg.type === 'security-updated' || msg.type === 'meeting-locked') {
+        if (msg.security) securityState = msg.security;
+        if (typeof msg.locked === 'boolean') {
+          securityState = securityState || {};
+          securityState.locked = msg.locked;
+          showToast(msg.locked ? 'Meeting locked' : 'Meeting unlocked');
+        }
+        applySecurityToForm(securityState);
+        const badge = document.getElementById('meetingBadge');
+        if (badge && securityState) {
+          badge.classList.toggle('locked', !!securityState.locked);
         }
         return;
       }
@@ -1421,83 +1497,151 @@
   }
 
   let showDeviceIcons = true;
+  let myRole = 'participant';
+  let myPermissions = {};
+  let waitingList = [];
+  let raisedHands = [];
+  let securityState = null;
+  let handRaised = false;
+  let removeTargetId = null;
+
 
   function renderParticipants() {
     if (!participantList) return;
     participantList.innerHTML = '';
+    const raisedListEl = document.getElementById('raisedHandsList');
+    const waitingListEl = document.getElementById('waitingList');
+    const raisedLabel = document.getElementById('raisedHandsLabel');
+    const waitingLabel = document.getElementById('waitingSectionLabel');
+    const waitingBanner = document.getElementById('waitingBanner');
+    const waitingBannerText = document.getElementById('waitingBannerText');
+    if (raisedListEl) raisedListEl.innerHTML = '';
+    if (waitingListEl) waitingListEl.innerHTML = '';
+
     if (participantCount) participantCount.textContent = String(participants.length);
 
+    const myId = currentMeeting?.participantId;
+    const canModerate = !!(myPermissions.muteOthers || myPermissions.removePeople || myPermissions.manageWaiting || myPermissions.manageRoles);
+
     const sorted = [...participants].sort((a, b) => {
-      if (a.isHost && !b.isHost) return -1;
-      if (!a.isHost && b.isHost) return 1;
-      if (a.id === currentMeeting?.participantId) return -1;
-      if (b.id === currentMeeting?.participantId) return 1;
-      return 0;
+      const rank = (p) => (p.role === 'host' || p.isHost ? 0 : p.role === 'cohost' ? 1 : 2);
+      const ra = rank(a), rb = rank(b);
+      if (ra !== rb) return ra - rb;
+      if (a.id === myId) return -1;
+      if (b.id === myId) return 1;
+      return String(a.name || '').localeCompare(String(b.name || ''));
     });
 
-    const VISIBLE = 4;
-    const pinned = sorted.slice(0, VISIBLE);
-    const rest = sorted.slice(VISIBLE);
-    const myId = currentMeeting?.participantId;
-
-    const appendItem = (p, parent) => {
+    const appendItem = (p, parent, opts = {}) => {
       const li = document.createElement('li');
       li.className = 'participant-item';
-      if (p.isHost) li.classList.add('host');
+      if (p.isHost || p.role === 'host') li.classList.add('host');
       if (p.id === myId) li.classList.add('me');
-      const offline = p.online === false;
-      if (offline) li.style.opacity = '0.55';
+      if (p.online === false) li.style.opacity = '0.55';
 
+      const role = p.role || (p.isHost ? 'host' : 'participant');
+      const roleClass = role === 'host' ? 'host' : role === 'cohost' ? 'cohost' : role === 'guest' ? 'guest' : '';
+      const roleHtml = `<span class="role-tag ${roleClass}">${escapeHtml(p.roleLabel || role)}</span>`;
+      const handHtml = p.handRaised ? '<span class="hand-badge" title="Hand raised">✋</span>' : '';
+      const muteTag = p.mutedByHost ? ' <span class="host-tag" title="Muted">muted</span>' : '';
       const deviceHtml = showDeviceIcons
         ? `<i class="fa-solid ${deviceIcon(p.device)} device-icon" title="${escapeHtml(p.device || 'desktop')}"></i>`
         : '';
-      const muteTag = p.mutedByHost ? ' <span class="host-tag" title="Muted">muted</span>' : '';
+
       li.innerHTML = `
         ${deviceHtml}
-        <span class="p-name">${escapeHtml(p.name)}${p.isHost ? ' <span class="host-tag">Host</span>' : ''}${p.id === myId ? ' <span class="me-tag">(you)</span>' : ''}${muteTag}</span>
+        <span class="p-name">${escapeHtml(p.name)}${p.id === myId ? ' <span class="me-tag">(you)</span>' : ''}${roleHtml}${handHtml}${muteTag}</span>
         ${p.sharing ? '<span class="live-dot" title="Sharing screen" aria-label="Sharing"></span>' : ''}
       `;
 
-      if (p.id !== myId) {
-        const actions = document.createElement('div');
-        actions.className = 'participant-actions';
-        const muteBtn = document.createElement('button');
-        muteBtn.type = 'button';
-        muteBtn.className = 'btn small-btn';
-        muteBtn.title = 'Mute this person';
-        muteBtn.innerHTML = '<i class="fa-solid fa-microphone-slash"></i>';
-        muteBtn.addEventListener('click', (e) => {
+      if (p.id !== myId && (canModerate || opts.waiting)) {
+        const more = document.createElement('button');
+        more.type = 'button';
+        more.className = 'btn icon-btn participant-more';
+        more.title = 'Actions';
+        more.innerHTML = '<i class="fa-solid fa-ellipsis"></i>';
+        more.addEventListener('click', (e) => {
           e.stopPropagation();
-          sendWS({ type: 'mute-participant', targetId: p.id });
+          openParticipantMenu(p, e.clientX, e.clientY, opts);
         });
-        actions.appendChild(muteBtn);
-        li.appendChild(actions);
+        li.appendChild(more);
       }
       parent.appendChild(li);
     };
 
-    pinned.forEach((p) => appendItem(p, participantList));
+    sorted.forEach((p) => appendItem(p, participantList));
 
-    if (rest.length) {
-      const wrap = document.createElement('li');
-      wrap.className = 'participant-collapse';
-      const toggle = document.createElement('button');
-      toggle.type = 'button';
-      toggle.className = 'collapse-toggle';
-      toggle.setAttribute('aria-expanded', 'false');
-      toggle.innerHTML = `<i class="fa-solid fa-chevron-down"></i> <span>${rest.length} more</span>`;
-      const sub = document.createElement('ul');
-      sub.className = 'participant-list nested collapsed';
-      rest.forEach((p) => appendItem(p, sub));
-      toggle.addEventListener('click', () => {
-        const open = sub.classList.toggle('collapsed') === false;
-        toggle.setAttribute('aria-expanded', String(open));
-        toggle.querySelector('span').textContent = open ? 'Show less' : `${rest.length} more`;
-        toggle.querySelector('i')?.classList.toggle('rotated', open);
-      });
-      wrap.appendChild(toggle);
-      wrap.appendChild(sub);
-      participantList.appendChild(wrap);
+    // Raised hands section
+    if (raisedListEl && raisedLabel) {
+      if (raisedHands && raisedHands.length) {
+        raisedLabel.classList.remove('hidden');
+        raisedLabel.textContent = `Raised hands · ${raisedHands.length}`;
+        raisedHands.forEach((h, i) => {
+          const p = participants.find((x) => x.id === h.id) || h;
+          const li = document.createElement('li');
+          li.className = 'participant-item';
+          const sec = h.elapsedMs != null ? Math.round(h.elapsedMs / 1000) + 's' : '';
+          li.innerHTML = `<span class="p-name">① ${escapeHtml(p.name || h.name)} ${sec ? '<span class="me-tag">' + sec + '</span>' : ''}</span>`;
+          if (myPermissions.lowerHands) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'btn small-btn';
+            btn.textContent = 'Lower';
+            btn.addEventListener('click', () => sendWS({ type: 'lower-hand', targetId: h.id }));
+            li.appendChild(btn);
+          }
+          raisedListEl.appendChild(li);
+        });
+      } else {
+        raisedLabel.classList.add('hidden');
+      }
+    }
+
+    // Waiting section
+    if (waitingListEl && waitingLabel) {
+      if (waitingList && waitingList.length && myPermissions.manageWaiting) {
+        waitingLabel.classList.remove('hidden');
+        waitingLabel.textContent = `Waiting · ${waitingList.length}`;
+        waitingList.forEach((p) => {
+          const li = document.createElement('li');
+          li.className = 'participant-item';
+          li.innerHTML = `<span class="p-name">${escapeHtml(p.name)}</span>`;
+          const actions = document.createElement('div');
+          actions.className = 'participant-actions';
+          const admit = document.createElement('button');
+          admit.type = 'button';
+          admit.className = 'btn small-btn primary-outline';
+          admit.textContent = 'Admit';
+          admit.addEventListener('click', () => sendWS({ type: 'admit-participant', targetId: p.id }));
+          const decline = document.createElement('button');
+          decline.type = 'button';
+          decline.className = 'btn small-btn';
+          decline.textContent = 'Decline';
+          decline.addEventListener('click', () => sendWS({ type: 'decline-participant', targetId: p.id }));
+          actions.appendChild(admit);
+          actions.appendChild(decline);
+          li.appendChild(actions);
+          waitingListEl.appendChild(li);
+        });
+      } else {
+        waitingLabel.classList.add('hidden');
+      }
+    }
+
+    if (waitingBanner && waitingBannerText) {
+      if (waitingList && waitingList.length && myPermissions.manageWaiting) {
+        waitingBanner.classList.remove('hidden');
+        waitingBannerText.textContent = `${waitingList.length} people want to join`;
+      } else {
+        waitingBanner.classList.add('hidden');
+      }
+    }
+
+    // Security button visibility
+    const secBtn = document.getElementById('securityBtn');
+    if (secBtn) {
+      if (myPermissions.manageSecurity || myPermissions.lockMeeting) secBtn.classList.remove('hidden');
+      else secBtn.classList.add('hidden');
     }
   }
 
@@ -1595,10 +1739,30 @@
       name: data.name,
       participantId: data.participantId,
       participantName,
-      isHost: !!isHost,
+      isHost: !!isHost || data.role === 'host',
+      role: data.role || (isHost ? 'host' : 'participant'),
     };
+    myRole = currentMeeting.role;
+    myPermissions = data.permissions || {};
     participants = data.participants || [];
+    waitingList = data.waiting || [];
+    raisedHands = data.raisedHands || [];
+    securityState = data.security || null;
+    handRaised = false;
 
+    // Waiting room — hold until admitted
+    if (data.status === 'WAITING' || data.waitingRoom) {
+      saveSession(currentMeeting);
+      setMeetingUrl(currentMeeting.code, !!opts.replaceUrl);
+      homeView?.classList.add('hidden');
+      historyView?.classList.add('hidden');
+      meetingView?.classList.add('hidden');
+      showWaitingRoom(data);
+      connectWS();
+      return;
+    }
+
+    hideWaitingRoom();
     saveSession(currentMeeting);
     setMeetingUrl(currentMeeting.code, !!opts.replaceUrl);
 
@@ -1609,6 +1773,7 @@
     if (meetingBadge) {
       meetingBadge.textContent = formatCode(currentMeeting.letters, currentMeeting.numbers);
       meetingBadge.classList.remove('hidden');
+      meetingBadge.classList.toggle('locked', !!(securityState && securityState.locked));
     }
     copyCodeBtn?.classList.remove('hidden');
 
@@ -1761,9 +1926,10 @@
     }
     createBtn.disabled = true;
     try {
+      const tmpl = (typeof getSelectedTemplateSettings === 'function') ? getSelectedTemplateSettings() : {};
       const data = await api('/api/create', {
         method: 'POST',
-        body: JSON.stringify({ name, participantName: yourName }),
+        body: JSON.stringify(Object.assign({ name, participantName: yourName, device: detectDevice() }, tmpl)),
       });
       await showMeeting(data, true, { participantName: yourName });
     } catch (e) {
@@ -1800,9 +1966,10 @@
     }
     joinBtn.disabled = true;
     try {
+      const urlKey = new URLSearchParams(location.search).get('key') || undefined;
       const data = await api('/api/join', {
         method: 'POST',
-        body: JSON.stringify({ letters, numbers, participantName: yourName }),
+        body: JSON.stringify({ letters, numbers, participantName: yourName, key: urlKey, device: detectDevice() }),
       });
       await showMeeting(data, false, { participantName: yourName });
     } catch (e) {
@@ -3110,4 +3277,588 @@
   }
 
   restoreSession().then(function () { tryRejoinFromUrl(); });
+
+
+  // ========== PHASE 1: moderation UI helpers ==========
+
+  function showToast(message, actions) {
+    const host = document.getElementById('toastHost');
+    if (!host) return;
+    const el = document.createElement('div');
+    el.className = 'toast';
+    el.innerHTML = `<span>${escapeHtml(message)}</span>`;
+    if (actions && actions.length) {
+      actions.forEach((a) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = a.label;
+        b.addEventListener('click', () => {
+          a.onClick && a.onClick();
+          el.remove();
+        });
+        el.appendChild(b);
+      });
+    }
+    host.appendChild(el);
+    setTimeout(() => { try { el.remove(); } catch (_) {} }, 5000);
+  }
+
+  function openParticipantMenu(p, x, y, opts) {
+    const menu = document.getElementById('participantMenu');
+    if (!menu) return;
+    const role = p.role || (p.isHost ? 'host' : 'participant');
+    let html = `<div class="menu-head">${escapeHtml(p.name)}</div><div class="menu-sub">${escapeHtml(p.roleLabel || role)}</div><div class="menu-sep"></div>`;
+
+    if (opts && opts.waiting) {
+      html += `<button type="button" data-act="admit"><i class="fa-solid fa-check"></i> Admit</button>`;
+      html += `<button type="button" data-act="decline" class="danger"><i class="fa-solid fa-xmark"></i> Decline</button>`;
+    } else {
+      if (myPermissions.muteOthers) {
+        html += `<button type="button" data-act="mute"><i class="fa-solid fa-microphone-slash"></i> Mute</button>`;
+        html += `<button type="button" data-act="ask-unmute"><i class="fa-solid fa-microphone"></i> Ask to unmute</button>`;
+      }
+      if (myPermissions.lowerHands && p.handRaised) {
+        html += `<button type="button" data-act="lower-hand"><i class="fa-solid fa-hand"></i> Lower hand</button>`;
+      }
+      if (p.sharing && (myPermissions.muteOthers || myRole === 'host' || myRole === 'cohost')) {
+        html += `<button type="button" data-act="stop-share"><i class="fa-solid fa-desktop"></i> Stop sharing</button>`;
+      }
+      html += `<div class="menu-sep"></div>`;
+      if (myPermissions.manageRoles && role !== 'host') {
+        if (role !== 'cohost') {
+          html += `<button type="button" data-act="make-cohost"><i class="fa-solid fa-user-shield"></i> Make co-host</button>`;
+        } else {
+          html += `<button type="button" data-act="remove-cohost"><i class="fa-solid fa-user"></i> Remove co-host</button>`;
+        }
+      }
+      if (myRole === 'host' && role !== 'host') {
+        html += `<button type="button" data-act="transfer-host"><i class="fa-solid fa-crown"></i> Transfer host</button>`;
+      }
+      if (myPermissions.removePeople && role !== 'host') {
+        html += `<button type="button" data-act="remove" class="danger"><i class="fa-solid fa-user-minus"></i> Remove from meeting</button>`;
+      }
+    }
+    menu.innerHTML = html;
+    menu.classList.remove('hidden');
+    const pad = 8;
+    const mw = menu.offsetWidth || 200;
+    const mh = menu.offsetHeight || 200;
+    menu.style.left = Math.min(x, window.innerWidth - mw - pad) + 'px';
+    menu.style.top = Math.min(y, window.innerHeight - mh - pad) + 'px';
+
+    menu.onclick = (e) => {
+      const btn = e.target.closest('button[data-act]');
+      if (!btn) return;
+      const act = btn.getAttribute('data-act');
+      if (act === 'mute') sendWS({ type: 'mute-participant', targetId: p.id });
+      if (act === 'ask-unmute') sendWS({ type: 'ask-unmute', targetId: p.id });
+      if (act === 'lower-hand') sendWS({ type: 'lower-hand', targetId: p.id });
+      if (act === 'make-cohost') sendWS({ type: 'set-role', targetId: p.id, role: 'cohost' });
+      if (act === 'remove-cohost') sendWS({ type: 'set-role', targetId: p.id, role: 'participant' });
+      if (act === 'transfer-host') {
+        if (confirm('Transfer host? You will become a co-host.')) {
+          sendWS({ type: 'transfer-host', targetId: p.id });
+        }
+      }
+      if (act === 'admit') sendWS({ type: 'admit-participant', targetId: p.id });
+      if (act === 'decline') sendWS({ type: 'decline-participant', targetId: p.id });
+      if (act === 'remove') openRemoveModal(p);
+      menu.classList.add('hidden');
+    };
+  }
+
+  function openRemoveModal(p) {
+    removeTargetId = p.id;
+    const modal = document.getElementById('removeModal');
+    const title = document.getElementById('removeModalTitle');
+    if (title) title.textContent = `Remove ${p.name}?`;
+    const prevent = document.getElementById('removePreventRejoin');
+    if (prevent) prevent.checked = false;
+    if (modal) modal.classList.remove('hidden');
+  }
+
+  function applySecurityToForm(sec) {
+    if (!sec) return;
+    const map = {
+      secWaitingRoom: 'waitingRoom',
+      secGuestAccess: 'guestAccess',
+      secLocked: 'locked',
+      secScreenShare: 'participantScreenShare',
+      secMicrophone: 'participantMicrophone',
+      secChat: 'chat',
+      secReactions: 'reactions',
+      secRaiseHand: 'raiseHand',
+      secPartInvite: 'participantsCanInvite',
+      secGuestInvite: 'guestsCanInvite',
+    };
+    Object.keys(map).forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.checked = !!sec[map[id]];
+    });
+  }
+
+  function wirePhase1UI() {
+    const raiseBtn = document.getElementById('raiseHandBtn');
+    if (raiseBtn) {
+      raiseBtn.addEventListener('click', () => {
+        if (handRaised) {
+          sendWS({ type: 'lower-hand' });
+          handRaised = false;
+          raiseBtn.classList.remove('active');
+          raiseBtn.setAttribute('aria-pressed', 'false');
+        } else {
+          sendWS({ type: 'raise-hand' });
+          handRaised = true;
+          raiseBtn.classList.add('active');
+          raiseBtn.setAttribute('aria-pressed', 'true');
+        }
+      });
+    }
+
+    const secBtn = document.getElementById('securityBtn');
+    const drawer = document.getElementById('securityDrawer');
+    const closeSec = document.getElementById('securityDrawerClose');
+    const backdrop = document.getElementById('securityDrawerBackdrop');
+    function openSecurity() {
+      if (!drawer) return;
+      applySecurityToForm(securityState);
+      drawer.classList.remove('hidden');
+      drawer.setAttribute('aria-hidden', 'false');
+    }
+    function closeSecurity() {
+      if (!drawer) return;
+      drawer.classList.add('hidden');
+      drawer.setAttribute('aria-hidden', 'true');
+    }
+    if (secBtn) secBtn.addEventListener('click', openSecurity);
+    if (closeSec) closeSec.addEventListener('click', closeSecurity);
+    if (backdrop) backdrop.addEventListener('click', closeSecurity);
+
+    const secIds = ['secWaitingRoom','secGuestAccess','secLocked','secScreenShare','secMicrophone','secChat','secReactions','secRaiseHand','secPartInvite','secGuestInvite'];
+    secIds.forEach((id) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.addEventListener('change', () => {
+        const settings = {
+          waitingRoom: !!document.getElementById('secWaitingRoom')?.checked,
+          guestAccess: !!document.getElementById('secGuestAccess')?.checked,
+          locked: !!document.getElementById('secLocked')?.checked,
+          participantScreenShare: !!document.getElementById('secScreenShare')?.checked,
+          participantMicrophone: !!document.getElementById('secMicrophone')?.checked,
+          chat: !!document.getElementById('secChat')?.checked,
+          reactions: !!document.getElementById('secReactions')?.checked,
+          raiseHand: !!document.getElementById('secRaiseHand')?.checked,
+          participantsCanInvite: !!document.getElementById('secPartInvite')?.checked,
+          guestsCanInvite: !!document.getElementById('secGuestInvite')?.checked,
+        };
+        sendWS({ type: 'update-security', settings });
+        if (id === 'secLocked') {
+          sendWS({ type: settings.locked ? 'lock-meeting' : 'unlock-meeting' });
+        }
+      });
+    });
+
+    const removeConfirm = document.getElementById('removeConfirmBtn');
+    const removeCancel = document.getElementById('removeCancelBtn');
+    const removeBackdrop = document.getElementById('removeModalBackdrop');
+    const removeModal = document.getElementById('removeModal');
+    if (removeConfirm) {
+      removeConfirm.addEventListener('click', () => {
+        if (!removeTargetId) return;
+        const prevent = !!document.getElementById('removePreventRejoin')?.checked;
+        sendWS({ type: 'remove-participant', targetId: removeTargetId, preventRejoin: prevent });
+        removeTargetId = null;
+        if (removeModal) removeModal.classList.add('hidden');
+      });
+    }
+    function closeRemove() {
+      removeTargetId = null;
+      if (removeModal) removeModal.classList.add('hidden');
+    }
+    if (removeCancel) removeCancel.addEventListener('click', closeRemove);
+    if (removeBackdrop) removeBackdrop.addEventListener('click', closeRemove);
+
+    document.addEventListener('click', (e) => {
+      const menu = document.getElementById('participantMenu');
+      if (menu && !menu.classList.contains('hidden') && !menu.contains(e.target)) {
+        menu.classList.add('hidden');
+      }
+    });
+
+    const reviewBtn = document.getElementById('reviewWaitingBtn');
+    if (reviewBtn) {
+      reviewBtn.addEventListener('click', () => {
+        document.getElementById('waitingSectionLabel')?.scrollIntoView({ behavior: 'smooth' });
+      });
+    }
+
+    const waitingLeave = document.getElementById('waitingLeaveBtn');
+    if (waitingLeave) {
+      waitingLeave.addEventListener('click', () => {
+        leaveMeeting && leaveMeeting();
+      });
+    }
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+      if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+      if (!currentMeeting) return;
+      if (e.key === 'h' || e.key === 'H') {
+        e.preventDefault();
+        raiseBtn && raiseBtn.click();
+      }
+    });
+  }
+
+  function showWaitingRoom(data) {
+    const wv = document.getElementById('waitingView');
+    const hv = document.getElementById('homeView');
+    const mv = document.getElementById('meetingView');
+    if (hv) hv.classList.add('hidden');
+    if (mv) mv.classList.add('hidden');
+    if (wv) {
+      wv.classList.remove('hidden');
+      const codeLabel = document.getElementById('waitingCodeLabel');
+      if (codeLabel && data) {
+        const c = data.code || '';
+        codeLabel.textContent = c.length === 6 ? c.slice(0, 3) + '-' + c.slice(3) : c;
+      }
+    }
+  }
+
+  function hideWaitingRoom() {
+    const wv = document.getElementById('waitingView');
+    if (wv) wv.classList.add('hidden');
+  }
+
+  // Hook into boot
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', wirePhase1UI);
+  } else {
+    wirePhase1UI();
+  }
+
+
+
+
+  // ========== PHASE 2 ==========
+  let activityEntries = [];
+  let recordingState = null;
+  let recordingTimerInterval = null;
+  let templatesCache = [];
+
+  function formatActivityLabel(entry) {
+    const name = entry.actorName || 'Someone';
+    const t = entry.eventType || '';
+    const map = {
+      hand_raised: name + ' raised hand',
+      hand_lowered: name + ' lowered a hand',
+      role_changed: name + ' changed a role',
+      host_transferred: name + ' transferred host',
+      participant_removed: name + ' removed a participant',
+      muted: name + ' muted someone',
+      locked: name + ' locked the meeting',
+      unlocked: name + ' unlocked the meeting',
+      share_started: name + ' started sharing',
+      share_stopped: name + ' stopped sharing',
+      recording_started: name + ' started recording',
+      recording_stopped: name + ' stopped recording',
+      joined: name + ' joined',
+      left: name + ' left',
+    };
+    return map[t] || (name + ' · ' + t);
+  }
+
+  function formatClock(ts) {
+    const d = typeof ts === 'number' ? new Date(ts) : new Date(ts);
+    if (Number.isNaN(d.getTime())) return '';
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function renderActivityList() {
+    const list = document.getElementById('activityList');
+    const empty = document.getElementById('activityEmpty');
+    if (!list) return;
+    list.innerHTML = '';
+    const items = activityEntries.slice().reverse();
+    if (!items.length) {
+      if (empty) empty.classList.remove('hidden');
+      return;
+    }
+    if (empty) empty.classList.add('hidden');
+    items.forEach((e) => {
+      const li = document.createElement('li');
+      li.innerHTML = `<span class="act-time">${escapeHtml(formatClock(e.at))}</span>
+        <span><span class="act-dot"></span>${escapeHtml(formatActivityLabel(e))}</span>`;
+      list.appendChild(li);
+    });
+  }
+
+  function openDrawer(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.remove('hidden');
+    el.setAttribute('aria-hidden', 'false');
+  }
+  function closeDrawer(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.add('hidden');
+    el.setAttribute('aria-hidden', 'true');
+  }
+
+  async function loadActivity() {
+    if (!currentMeeting) return;
+    try {
+      const data = await api('/api/activity?code=' + encodeURIComponent(currentMeeting.code));
+      const hist = (data.history || []).map((r) => ({
+        at: r.at,
+        actorName: r.actorName,
+        eventType: r.eventType,
+        detail: r.detail,
+      }));
+      const live = (data.live || []).map((e) => ({
+        at: e.at,
+        actorName: e.actorName,
+        eventType: e.eventType,
+        detail: e.detail,
+      }));
+      activityEntries = hist.length ? hist : live;
+      renderActivityList();
+    } catch (_) {}
+  }
+
+  function updateRecordingBadge() {
+    const badge = document.getElementById('recordingBadge');
+    const timer = document.getElementById('recordingTimer');
+    if (!badge) return;
+    if (recordingState && recordingState.status === 'recording') {
+      badge.classList.remove('hidden');
+      const start = recordingState.startedAt || Date.now();
+      const tick = () => {
+        const sec = Math.max(0, Math.floor((Date.now() - start) / 1000));
+        const m = String(Math.floor(sec / 60)).padStart(2, '0');
+        const s = String(sec % 60).padStart(2, '0');
+        if (timer) timer.textContent = m + ':' + s;
+      };
+      tick();
+      if (recordingTimerInterval) clearInterval(recordingTimerInterval);
+      recordingTimerInterval = setInterval(tick, 1000);
+    } else {
+      badge.classList.add('hidden');
+      if (recordingTimerInterval) clearInterval(recordingTimerInterval);
+      recordingTimerInterval = null;
+    }
+  }
+
+  async function refreshDiagnostics() {
+    const label = document.getElementById('diagLabel');
+    const dot = document.getElementById('diagDot');
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+    let quality = 'Excellent';
+    let cls = 'good';
+    let latency = '—';
+    let audio = 'Excellent';
+    let video = 'Excellent';
+    let share = 'Excellent';
+    try {
+      if (typeof room !== 'undefined' && room && room.engine) {
+        // LiveKit room stats if available
+      }
+      if (navigator.connection) {
+        const c = navigator.connection;
+        set('diagNetwork', (c.effectiveType || 'Wi-Fi') + (c.downlink ? ' · ' + c.downlink + ' Mbps' : ''));
+        if (c.rtt != null) latency = c.rtt + ' ms';
+        if (c.rtt > 200 || c.effectiveType === '2g') { quality = 'Unstable'; cls = 'bad'; }
+        else if (c.rtt > 100 || c.effectiveType === '3g') { quality = 'Fair'; cls = 'warn'; }
+      } else {
+        set('diagNetwork', 'Wi-Fi / Ethernet');
+      }
+      if (ws && ws.readyState === 1) {
+        // soft ping via message timestamp not available; use online
+      } else {
+        quality = 'Disconnected';
+        cls = 'bad';
+      }
+    } catch (_) {}
+    if (label) label.textContent = quality;
+    if (dot) { dot.className = 'diag-dot ' + cls; }
+    set('diagLatency', latency);
+    set('diagAudio', audio);
+    set('diagVideo', video);
+    set('diagShare', share);
+    const hint = document.getElementById('diagHint');
+    if (hint) {
+      hint.textContent = cls === 'bad'
+        ? 'Your connection may affect audio and screen sharing.'
+        : cls === 'warn'
+          ? 'Connection is usable but may fluctuate.'
+          : '';
+    }
+  }
+
+  async function loadTemplates() {
+    try {
+      const data = await api('/api/templates');
+      templatesCache = data.templates || [];
+      const sel = document.getElementById('templateSelect');
+      if (!sel) return;
+      sel.innerHTML = '';
+      templatesCache.forEach((t) => {
+        const opt = document.createElement('option');
+        opt.value = t.slug;
+        opt.textContent = t.name;
+        sel.appendChild(opt);
+      });
+    } catch (_) {}
+  }
+
+  function getSelectedTemplateSettings() {
+    const sel = document.getElementById('templateSelect');
+    if (!sel) return {};
+    const t = templatesCache.find((x) => x.slug === sel.value);
+    return (t && t.settings) || {};
+  }
+
+  function wirePhase2UI() {
+    loadTemplates();
+
+    const pairs = [
+      ['activityDrawerClose', 'activityDrawer'],
+      ['activityDrawerBackdrop', 'activityDrawer'],
+      ['diagDrawerClose', 'diagDrawer'],
+      ['diagDrawerBackdrop', 'diagDrawer'],
+    ];
+    pairs.forEach(([btnId, drawerId]) => {
+      const el = document.getElementById(btnId);
+      if (el) el.addEventListener('click', () => closeDrawer(drawerId));
+    });
+
+    document.getElementById('liveStatus')?.addEventListener('click', () => {
+      refreshDiagnostics();
+      openDrawer('diagDrawer');
+    });
+
+    // More menu actions
+    document.getElementById('moreMenu')?.addEventListener('click', (e) => {
+      const item = e.target.closest('[data-action]');
+      if (!item) return;
+      const act = item.getAttribute('data-action');
+      if (act === 'activity') {
+        loadActivity();
+        openDrawer('activityDrawer');
+      }
+      if (act === 'record') {
+        if (recordingState && recordingState.status === 'recording') {
+          sendWS({ type: 'stop-recording' });
+        } else {
+          document.getElementById('recordModal')?.classList.remove('hidden');
+        }
+      }
+    });
+
+    document.getElementById('recordCancelBtn')?.addEventListener('click', () => {
+      document.getElementById('recordModal')?.classList.add('hidden');
+    });
+    document.getElementById('recordModalBackdrop')?.addEventListener('click', () => {
+      document.getElementById('recordModal')?.classList.add('hidden');
+    });
+    document.getElementById('recordStartBtn')?.addEventListener('click', () => {
+      sendWS({
+        type: 'start-recording',
+        audio: !!document.getElementById('recAudio')?.checked,
+        video: !!document.getElementById('recVideo')?.checked,
+        screenShare: !!document.getElementById('recScreen')?.checked,
+        chat: !!document.getElementById('recChat')?.checked,
+      });
+      document.getElementById('recordModal')?.classList.add('hidden');
+    });
+
+    // Keyboard shortcuts expansion
+    document.addEventListener('keydown', (e) => {
+      if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT')) return;
+      if (!currentMeeting) return;
+      if (e.key === 'm' || e.key === 'M') {
+        e.preventDefault();
+        try { toggleMic(); } catch (_) {}
+      }
+      if (e.key === 's' || e.key === 'S') {
+        if (e.metaKey || e.ctrlKey) return;
+        e.preventDefault();
+        try {
+          if (typeof isSharing !== 'undefined' && isSharing) stopShare();
+          else startShare();
+        } catch (_) {}
+      }
+    });
+  }
+
+  // Extend WS handler side-effects via polling override: patch into existing by monkey-patch after connect
+  const _origShowMeeting = typeof showMeeting === 'function' ? showMeeting : null;
+
+  // Show activity/record in more menu when in meeting
+  function refreshPhase2Chrome() {
+    const act = document.querySelector('.more-activity');
+    const rec = document.querySelector('.more-record');
+    if (act) act.classList.toggle('hidden', !currentMeeting);
+    if (rec) {
+      const isHost = myRole === 'host' || currentMeeting?.isHost;
+      rec.classList.toggle('hidden', !currentMeeting || !isHost);
+      if (rec && recordingState && recordingState.status === 'recording') {
+        rec.innerHTML = '<i class="fa-solid fa-stop"></i> Stop recording';
+      } else if (rec) {
+        rec.innerHTML = '<i class="fa-solid fa-circle"></i> Record';
+      }
+    }
+  }
+
+  // Listen for phase2 WS messages - append to socket handler by intercepting
+  const _phase2MsgTypes = {
+    activity: function (msg) {
+      if (msg.entry) {
+        activityEntries.push(msg.entry);
+        if (activityEntries.length > 200) activityEntries.shift();
+        renderActivityList();
+      }
+    },
+    'recording-state': function (msg) {
+      recordingState = msg.recording || null;
+      updateRecordingBadge();
+      refreshPhase2Chrome();
+    },
+    toast: function (msg) {
+      if (msg.message) showToast(msg.message);
+    },
+  };
+
+  // Hook: wrap connectWS message path - find by patching after definition is hard;
+  // Use event delegation on a custom bus if available, else interval-free monkey on WebSocket
+  const _NativeWS = window.WebSocket;
+  // Safer: extend the existing handler block was done for phase1; add duplicate check via Mutation of last message handler
+  // Install capture on message by overriding sendWS/connectWS post-init
+  setTimeout(function installPhase2WsHook() {
+    // Patch into socket.onmessage by wrapping connectWS if possible
+    if (typeof connectWS !== 'function') return;
+    const orig = connectWS;
+    // Can't easily wrap without replacing - use document-level CustomEvent from phase1 handler
+  }, 0);
+
+  // Direct: append handler by observing - inject into onmessage via periodic check
+  // Better approach: add to the message if block already patched - add phase2 types to the big if chain
+  // We already have force-mute etc. We'll use MutationObserver-free approach:
+  const _wsMsgInterceptor = function (msg) {
+    const fn = _phase2MsgTypes[msg.type];
+    if (fn) fn(msg);
+    if (msg.type === 'participants' || msg.type === 'participant-joined') refreshPhase2Chrome();
+  };
+  // Attach by wrapping JSON parse path - hook send is not enough
+  window.__meetPhase2OnMsg = _wsMsgInterceptor;
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', wirePhase2UI);
+  } else {
+    wirePhase2UI();
+  }
+
+
 })();

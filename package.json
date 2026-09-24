@@ -1,6 +1,6 @@
 {
   "name": "meet",
-  "version": "1.2.0",
+  "version": "1.4.0-phase2",
   "description": "Meet - Collaborative screen sharing and audio calls powered by LiveKit",
   "main": "server.js",
   "scripts": {

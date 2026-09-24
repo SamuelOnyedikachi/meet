@@ -5,8 +5,13 @@ const { features } = require('../lib/features');
 const {
   getMeeting,
   getParticipantsList,
+  getWaitingList,
+  getRaisedHands,
   getContentState,
+  getSecurityState,
   broadcast,
+  broadcastToModerators,
+  sendToParticipant,
   setClient,
   deleteClient,
   getClient,
@@ -26,8 +31,13 @@ function createPluginContext() {
     clients,
     getMeeting,
     getParticipantsList,
+    getWaitingList,
+    getRaisedHands,
     getContentState,
+    getSecurityState,
     broadcast,
+    broadcastToModerators,
+    sendToParticipant,
     getClient,
     setClient,
     deleteClient,
@@ -87,10 +97,15 @@ function attachWebSocket(server) {
           meeting.lastActivity = Date.now();
           if (!Array.isArray(meeting.chatHistory)) meeting.chatHistory = [];
           try {
+            const p = meeting.participants.get(participantId);
             ws.send(
               JSON.stringify({
                 type: 'participants',
                 participants: getParticipantsList(meeting),
+                waiting: getWaitingList(meeting),
+                raisedHands: getRaisedHands(meeting),
+                security: getSecurityState(meeting),
+                self: p ? { id: p.id, role: p.role, status: p.status } : null,
               })
             );
           } catch (_) {}
@@ -119,6 +134,9 @@ function attachWebSocket(server) {
             participantId,
             participants: getParticipantsList(meeting),
           });
+          if (typeof ctx.logActivity === 'function') {
+            try { ctx.logActivity(meeting, 'share_started', p); } catch (_) {}
+          }
         }
         return;
       }
@@ -132,6 +150,9 @@ function attachWebSocket(server) {
             participantId,
             participants: getParticipantsList(meeting),
           });
+          if (typeof ctx.logActivity === 'function') {
+            try { ctx.logActivity(meeting, 'share_stopped', p); } catch (_) {}
+          }
         }
         return;
       }
@@ -166,6 +187,8 @@ function attachWebSocket(server) {
             broadcast(meetingCode, {
               type: 'participants',
               participants: getParticipantsList(meeting),
+              waiting: getWaitingList(meeting),
+              raisedHands: getRaisedHands(meeting),
             });
             if (meeting.content && meeting.content.remoteHolderId === participantId) {
               broadcast(meetingCode, {

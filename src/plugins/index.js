@@ -4,6 +4,9 @@ const reactions = require('./reactions');
 const mute = require('./mute');
 const deviceIcons = require('./deviceIcons');
 const content = require('./content');
+const moderation = require('./moderation');
+const activity = require('./activity');
+const recording = require('./recording');
 
 function registerBuiltinPlugins() {
   registerPlugin(chat);
@@ -11,6 +14,9 @@ function registerBuiltinPlugins() {
   registerPlugin(mute);
   registerPlugin(deviceIcons);
   registerPlugin(content);
+  registerPlugin(moderation);
+  registerPlugin(activity);
+  registerPlugin(recording);
 }
 
 module.exports = {

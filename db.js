@@ -71,7 +71,65 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_scheduled_host ON scheduled_meetings(host_user_id);
   CREATE INDEX IF NOT EXISTS idx_scheduled_start ON scheduled_meetings(scheduled_start);
   CREATE INDEX IF NOT EXISTS idx_scheduled_status ON scheduled_meetings(status);
+
+  CREATE TABLE IF NOT EXISTS meeting_activity (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    meeting_history_id INTEGER,
+    code TEXT NOT NULL,
+    at TEXT NOT NULL DEFAULT (datetime('now')),
+    actor_id TEXT,
+    actor_name TEXT,
+    event_type TEXT NOT NULL,
+    detail TEXT,
+    FOREIGN KEY (meeting_history_id) REFERENCES meeting_history(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_activity_code ON meeting_activity(code);
+  CREATE INDEX IF NOT EXISTS idx_activity_meeting ON meeting_activity(meeting_history_id);
+
+  CREATE TABLE IF NOT EXISTS meeting_recordings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    meeting_history_id INTEGER,
+    code TEXT NOT NULL,
+    started_at TEXT NOT NULL DEFAULT (datetime('now')),
+    ended_at TEXT,
+    started_by_user_id INTEGER,
+    started_by_name TEXT,
+    options_json TEXT,
+    status TEXT NOT NULL DEFAULT 'recording',
+    FOREIGN KEY (meeting_history_id) REFERENCES meeting_history(id) ON DELETE SET NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_rec_code ON meeting_recordings(code);
+
+  CREATE TABLE IF NOT EXISTS meeting_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    slug TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    description TEXT,
+    settings_json TEXT NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0
+  );
 `);
+
+
+// Seed default meeting templates once
+(function seedTemplates() {
+  const count = db.prepare('SELECT COUNT(*) AS c FROM meeting_templates').get().c;
+  if (count > 0) return;
+  const ins = db.prepare(
+    `INSERT INTO meeting_templates (slug, name, description, settings_json, sort_order) VALUES (?, ?, ?, ?, ?)`
+  );
+  const templates = [
+    ['blank', 'Blank meeting', 'Default permissions', JSON.stringify({ waitingRoom: false, guestAccess: true, participantScreenShare: true }), 0],
+    ['research', 'Research meeting', 'Waiting room on, focused discussion', JSON.stringify({ waitingRoom: true, guestAccess: true, participantScreenShare: true, raiseHand: true }), 1],
+    ['classroom', 'Classroom', 'Raise hand + waiting room, limited guest share', JSON.stringify({ waitingRoom: true, guestAccess: false, participantScreenShare: false, raiseHand: true, participantsCanInvite: false }), 2],
+    ['team', 'Team meeting', 'Open collaboration', JSON.stringify({ waitingRoom: false, guestAccess: true, participantScreenShare: true, chat: true, reactions: true }), 3],
+    ['interview', 'Interview', 'Waiting room, no guest invite', JSON.stringify({ waitingRoom: true, guestAccess: true, participantScreenShare: false, guestsCanInvite: false }), 4],
+    ['presentation', 'Presentation', 'Presenter-focused, limited participant share', JSON.stringify({ waitingRoom: false, guestAccess: true, participantScreenShare: false, raiseHand: true }), 5],
+  ];
+  const tx = db.transaction((rows) => { for (const r of rows) ins.run(...r); });
+  tx(templates);
+})();
+
 
 function createUser({ username, email, passwordHash }) {
   const stmt = db.prepare(
@@ -237,6 +295,86 @@ function deleteScheduled(id, userId) {
   return db.prepare(`DELETE FROM scheduled_meetings WHERE id = ? AND host_user_id = ?`).run(id, userId);
 }
 
+
+// ----- Activity -----
+function logActivity({ meetingHistoryId, code, actorId, actorName, eventType, detail }) {
+  const stmt = db.prepare(`
+    INSERT INTO meeting_activity (meeting_history_id, code, actor_id, actor_name, event_type, detail)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  const info = stmt.run(
+    meetingHistoryId || null,
+    code,
+    actorId || null,
+    actorName || null,
+    eventType,
+    detail ? (typeof detail === 'string' ? detail : JSON.stringify(detail)) : null
+  );
+  return info.lastInsertRowid;
+}
+
+function getActivityForCode(code, limit = 100) {
+  return db.prepare(`
+    SELECT * FROM meeting_activity WHERE code = ? ORDER BY id DESC LIMIT ?
+  `).all(code, limit);
+}
+
+function getActivityForMeeting(meetingHistoryId, limit = 200) {
+  return db.prepare(`
+    SELECT * FROM meeting_activity WHERE meeting_history_id = ? ORDER BY id ASC LIMIT ?
+  `).all(meetingHistoryId, limit);
+}
+
+// ----- Recordings -----
+function startRecording({ meetingHistoryId, code, startedByUserId, startedByName, options }) {
+  const stmt = db.prepare(`
+    INSERT INTO meeting_recordings (meeting_history_id, code, started_by_user_id, started_by_name, options_json, status)
+    VALUES (?, ?, ?, ?, ?, 'recording')
+  `);
+  const info = stmt.run(
+    meetingHistoryId || null,
+    code,
+    startedByUserId || null,
+    startedByName || null,
+    options ? JSON.stringify(options) : null
+  );
+  return getRecordingById(info.lastInsertRowid);
+}
+
+function getRecordingById(id) {
+  return db.prepare(`SELECT * FROM meeting_recordings WHERE id = ?`).get(id);
+}
+
+function stopRecording(id) {
+  db.prepare(`
+    UPDATE meeting_recordings SET ended_at = datetime('now'), status = 'stopped' WHERE id = ? AND status = 'recording'
+  `).run(id);
+  return getRecordingById(id);
+}
+
+function getActiveRecordingForCode(code) {
+  return db.prepare(`
+    SELECT * FROM meeting_recordings WHERE code = ? AND status = 'recording' ORDER BY id DESC LIMIT 1
+  `).get(code);
+}
+
+function getRecordingsForCode(code, limit = 20) {
+  return db.prepare(`
+    SELECT * FROM meeting_recordings WHERE code = ? ORDER BY id DESC LIMIT ?
+  `).all(code, limit);
+}
+
+// ----- Templates -----
+function listTemplates() {
+  return db.prepare(`SELECT * FROM meeting_templates ORDER BY sort_order ASC, id ASC`).all();
+}
+
+function getTemplateBySlug(slug) {
+  return db.prepare(`SELECT * FROM meeting_templates WHERE slug = ?`).get(slug);
+}
+
+// Enhanced history with duration helper is client-side; ensure getHistory returns fields
+
 module.exports = {
   db,
   DB_PATH,
@@ -259,4 +397,14 @@ module.exports = {
   getScheduledForUser,
   updateScheduledStatus,
   deleteScheduled,
+  logActivity,
+  getActivityForCode,
+  getActivityForMeeting,
+  startRecording,
+  getRecordingById,
+  stopRecording,
+  getActiveRecordingForCode,
+  getRecordingsForCode,
+  listTemplates,
+  getTemplateBySlug,
 };

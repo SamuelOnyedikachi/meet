@@ -18,12 +18,25 @@ const {
   getMeeting,
   setMeeting,
   getParticipantsList,
+  getWaitingList,
+  getRaisedHands,
   getContentState,
+  getSecurityState,
+  getPublicMeetingState,
   broadcast,
+  broadcastToModerators,
+  sendToParticipant,
   generateCode,
+  generateInviteToken,
+  createMeetingSettings,
+  createParticipant,
   normalizeParticipantName,
   touchMeeting,
+  findParticipantByUserId,
+  isBlocked,
+  blockParticipant,
 } = require('../rooms/store');
+const { can, resolvePermissions } = require('../lib/permissions');
 const { endMeeting } = require('../rooms/lifecycle');
 const { createLiveKitToken, isLiveKitConfigured } = require('../livekit/tokens');
 const { features } = require('../lib/features');
@@ -371,19 +384,35 @@ function createRequestHandler() {
         participantId: hostId,
       });
 
-      const participants = new Map();
-      participants.set(hostId, {
-        id: hostId,
-        name: hostName,
-        isHost: true,
-        sharing: false,
-        userId: authUser ? authUser.id : null,
-        device: body.device || 'desktop',
-        mutedByHost: false,
+      const settings = createMeetingSettings({
+        waitingRoom: !!body.waitingRoom,
+        guestAccess: body.guestAccess !== false,
+        participantScreenShare: body.participantScreenShare !== false,
+        participantMicrophone: body.participantMicrophone !== false,
+        participantCamera: body.participantCamera !== false,
+        chat: body.chat !== false,
+        reactions: body.reactions !== false,
+        raiseHand: body.raiseHand !== false,
+        participantsCanInvite: !!body.participantsCanInvite,
+        guestsCanInvite: !!body.guestsCanInvite,
       });
 
+      const host = createParticipant({
+        id: hostId,
+        name: hostName,
+        role: 'host',
+        userId: authUser ? authUser.id : null,
+        device: body.device || 'desktop',
+        status: 'ACTIVE',
+      });
+
+      const participants = new Map();
+      participants.set(hostId, host);
+
       const now = Date.now();
+      const inviteToken = generateInviteToken();
       meetings.set(code, {
+        code,
         name,
         hostId,
         hostUserId: authUser ? authUser.id : null,
@@ -394,6 +423,14 @@ function createRequestHandler() {
         content: null,
         chatHistory: [],
         scheduledId: body.scheduledId || null,
+        settings,
+        inviteToken,
+        inviteAccess: body.inviteAccess || 'anyone', // anyone | approval
+        blocked: {
+          participantIds: new Set(),
+          userIds: new Set(),
+          names: new Set(),
+        },
       });
 
       if (body.scheduledId) {
@@ -404,6 +441,7 @@ function createRequestHandler() {
         } catch (_) {}
       }
 
+      const meeting = meetings.get(code);
       return sendJSON(res, 200, {
         code,
         letters: code.slice(0, 3),
@@ -411,7 +449,13 @@ function createRequestHandler() {
         name,
         hostId,
         participantId: hostId,
-        participants: getParticipantsList(meetings.get(code)),
+        role: 'host',
+        participants: getParticipantsList(meeting),
+        waiting: [],
+        raisedHands: [],
+        security: getSecurityState(meeting),
+        inviteToken,
+        inviteLink: `/${code.slice(0, 3)}-${code.slice(3)}?key=${inviteToken}`,
         content: null,
       });
     } catch (e) {
@@ -425,7 +469,6 @@ function createRequestHandler() {
       const body = await parseBody(req);
       let letters = (body.letters || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3);
       let numbers = (body.numbers || '').replace(/\D/g, '').slice(0, 3);
-      // Also accept full code: "ABC123" or "ABC-123"
       if ((!letters || !numbers) && body.code) {
         const raw = String(body.code).toUpperCase().replace(/[^A-Z0-9]/g, '');
         letters = raw.slice(0, 3).replace(/[^A-Z]/g, '');
@@ -439,9 +482,6 @@ function createRequestHandler() {
 
       const meeting = meetings.get(code);
       if (!meeting) return sendJSON(res, 404, { error: 'Meeting not found. Check the code.' });
-      if (meeting.participants.size >= 20) {
-        return sendJSON(res, 403, { error: 'Meeting is full (max 20)' });
-      }
 
       const authUser = await getAuthUser(req);
       const participantId = body.participantId || 'user-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
@@ -455,52 +495,134 @@ function createRequestHandler() {
         return sendJSON(res, 400, { error: 'Please enter your display name' });
       }
 
-      if (!meeting.participants.has(participantId)) {
-        meeting.participants.set(participantId, {
-          id: participantId,
-          name: participantName,
-          isHost: false,
-          sharing: false,
-          userId: authUser ? authUser.id : null,
-          device: body.device || 'desktop',
-          mutedByHost: false,
-        });
+      if (isBlocked(meeting, {
+        userId: authUser ? authUser.id : null,
+        participantId,
+        name: participantName,
+      })) {
+        return sendJSON(res, 403, { error: 'You no longer have access to this meeting.' });
+      }
 
-        if (meeting.historyId) {
-          db.logParticipantJoin({
-            meetingHistoryId: meeting.historyId,
-            userId: authUser ? authUser.id : null,
-            displayName: participantName,
-            participantId,
-          });
-          db.updateMaxParticipants(meeting.historyId, meeting.participants.size);
+      const existing = meeting.participants.get(participantId);
+      const existingByUser = authUser ? findParticipantByUserId(meeting, authUser.id) : null;
+      const rejoinCandidate = existing || existingByUser;
+
+      if (meeting.settings && meeting.settings.locked) {
+        const canRejoin = rejoinCandidate && (rejoinCandidate.status === 'ACTIVE' || rejoinCandidate.status === 'APPROVED' || rejoinCandidate.status === 'LEFT');
+        if (!canRejoin) {
+          return sendJSON(res, 403, { error: 'Meeting is locked. New participants cannot join.' });
         }
-      } else {
-        const existing = meeting.participants.get(participantId);
-        if (existing) {
-          existing.name = participantName;
-          if (body.device) existing.device = body.device;
+      }
+
+      const isGuest = !authUser;
+      if (isGuest && meeting.settings && meeting.settings.guestAccess === false) {
+        return sendJSON(res, 403, { error: 'Guest access is disabled for this meeting. Please sign in.' });
+      }
+
+      const activeCount = [...meeting.participants.values()].filter((p) => p.status === 'ACTIVE').length;
+      if (activeCount >= 20 && !(rejoinCandidate && rejoinCandidate.status === 'ACTIVE')) {
+        return sendJSON(res, 403, { error: 'Meeting is full (max 20)' });
+      }
+
+      let role = isGuest ? 'guest' : 'participant';
+      let status = 'ACTIVE';
+
+      if (rejoinCandidate) {
+        if (rejoinCandidate.status === 'BLOCKED' || rejoinCandidate.status === 'REMOVED') {
+          return sendJSON(res, 403, { error: 'You no longer have access to this meeting.' });
         }
+        if (rejoinCandidate.role === 'host' || rejoinCandidate.role === 'cohost') {
+          role = rejoinCandidate.role;
+        }
+      }
+
+      const needsWaiting =
+        meeting.settings &&
+        meeting.settings.waitingRoom &&
+        role !== 'host' &&
+        !(rejoinCandidate && (rejoinCandidate.status === 'ACTIVE' || rejoinCandidate.status === 'APPROVED' || rejoinCandidate.role === 'host' || rejoinCandidate.role === 'cohost'));
+
+      if (needsWaiting) status = 'WAITING';
+
+      const pid = (rejoinCandidate && rejoinCandidate.id) || participantId;
+      const participant = createParticipant({
+        id: pid,
+        name: participantName,
+        role: rejoinCandidate && (rejoinCandidate.role === 'host' || rejoinCandidate.role === 'cohost')
+          ? rejoinCandidate.role
+          : role,
+        userId: authUser ? authUser.id : null,
+        device: body.device || 'desktop',
+        status,
+      });
+      if (rejoinCandidate && rejoinCandidate.role === 'host') {
+        participant.role = 'host';
+        participant.isHost = true;
+      }
+
+      meeting.participants.set(pid, participant);
+
+      if (status === 'ACTIVE' && meeting.historyId) {
+        db.logParticipantJoin({
+          meetingHistoryId: meeting.historyId,
+          userId: authUser ? authUser.id : null,
+          displayName: participantName,
+          participantId: pid,
+        });
+        db.updateMaxParticipants(
+          meeting.historyId,
+          [...meeting.participants.values()].filter((p) => p.status === 'ACTIVE').length
+        );
       }
 
       meeting.lastActivity = Date.now();
 
+      if (status === 'WAITING') {
+        broadcastToModerators(code, {
+          type: 'waiting-request',
+          participant: { id: pid, name: participantName, role, isGuest },
+          waiting: getWaitingList(meeting),
+        });
+        return sendJSON(res, 200, {
+          code,
+          letters: code.slice(0, 3),
+          numbers: code.slice(3),
+          name: meeting.name,
+          participantId: pid,
+          role,
+          status: 'WAITING',
+          waitingRoom: true,
+          participants: [],
+          waiting: [],
+          security: getSecurityState(meeting),
+          content: null,
+        });
+      }
+
       broadcast(code, {
         type: 'participant-joined',
-        participantId,
+        participantId: pid,
         participants: getParticipantsList(meeting),
-      }, participantId);
+        waiting: getWaitingList(meeting),
+      }, pid);
 
       return sendJSON(res, 200, {
         code,
         letters: code.slice(0, 3),
         numbers: code.slice(3),
         name: meeting.name,
-        participantId,
+        participantId: pid,
+        role: participant.role,
+        status: 'ACTIVE',
         participants: getParticipantsList(meeting),
+        waiting: getWaitingList(meeting),
+        raisedHands: getRaisedHands(meeting),
+        security: getSecurityState(meeting),
         content: getContentState(meeting),
+        permissions: resolvePermissions(meeting, participant),
       });
     } catch (e) {
+      console.error('[join]', e);
       return sendJSON(res, 400, { error: e.message || 'Bad request' });
     }
   }
@@ -516,9 +638,35 @@ function createRequestHandler() {
       numbers: code.slice(3),
       name: meeting.name,
       participants: getParticipantsList(meeting),
+      waiting: getWaitingList(meeting),
+      raisedHands: getRaisedHands(meeting),
+      security: getSecurityState(meeting),
       createdAt: meeting.createdAt,
       content: getContentState(meeting),
+      locked: !!(meeting.settings && meeting.settings.locked),
     });
+  }
+
+  // Regenerate secure invite token (host only)
+  if (urlPath === '/api/invite/regenerate' && req.method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const code = (body.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const participantId = body.participantId;
+      const meeting = meetings.get(code);
+      if (!meeting) return sendJSON(res, 404, { error: 'Meeting not found' });
+      const actor = meeting.participants.get(participantId);
+      if (!actor || !can(meeting, actor, 'manageSecurity')) {
+        return sendJSON(res, 403, { error: 'Not allowed' });
+      }
+      meeting.inviteToken = generateInviteToken();
+      return sendJSON(res, 200, {
+        inviteToken: meeting.inviteToken,
+        inviteLink: `/${code.slice(0, 3)}-${code.slice(3)}?key=${meeting.inviteToken}`,
+      });
+    } catch (e) {
+      return sendJSON(res, 400, { error: e.message || 'Bad request' });
+    }
   }
 
   // ----- Schedule APIs (logged-in) -----
@@ -627,7 +775,12 @@ function createRequestHandler() {
       const participantId = body.participantId;
       const meeting = meetings.get(code);
       if (meeting && participantId) {
-        meeting.participants.delete(participantId);
+        const p = meeting.participants.get(participantId);
+        if (p) {
+          p.status = 'LEFT';
+          p.handRaisedAt = null;
+          p.sharing = false;
+        }
         clients.delete(participantId);
         meeting.lastActivity = Date.now();
 
@@ -638,13 +791,16 @@ function createRequestHandler() {
           });
         }
 
-        if (meeting.participants.size === 0) {
+        const activeLeft = [...meeting.participants.values()].filter((x) => x.status === 'ACTIVE').length;
+        if (activeLeft === 0) {
           endMeeting(code, 'empty');
         } else {
           broadcast(code, {
             type: 'participant-left',
             participantId,
             participants: getParticipantsList(meeting),
+            waiting: getWaitingList(meeting),
+            raisedHands: getRaisedHands(meeting),
           });
         }
       }
@@ -653,6 +809,62 @@ function createRequestHandler() {
       return sendJSON(res, 400, { error: 'Bad request' });
     }
   }
+
+  // ----- Phase 2: templates -----
+  if (urlPath === '/api/templates' && req.method === 'GET') {
+    try {
+      const rows = db.listTemplates();
+      return sendJSON(res, 200, {
+        templates: rows.map((r) => ({
+          id: r.id,
+          slug: r.slug,
+          name: r.name,
+          description: r.description,
+          settings: (() => { try { return JSON.parse(r.settings_json || '{}'); } catch { return {}; } })(),
+        })),
+      });
+    } catch (e) {
+      return sendJSON(res, 500, { error: e.message || 'Failed' });
+    }
+  }
+
+  // ----- Phase 2: activity -----
+  if (urlPath === '/api/activity' && req.method === 'GET') {
+    try {
+      const code = (parsed.searchParams.get('code') || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      if (!code) return sendJSON(res, 400, { error: 'code required' });
+      const meeting = meetings.get(code);
+      const live = meeting && Array.isArray(meeting.activityLive) ? meeting.activityLive.slice(-50) : [];
+      const rows = db.getActivityForCode(code, 100);
+      return sendJSON(res, 200, {
+        live,
+        history: rows.map((r) => ({
+          id: r.id,
+          at: r.at,
+          actorName: r.actor_name,
+          eventType: r.event_type,
+          detail: r.detail,
+        })),
+      });
+    } catch (e) {
+      return sendJSON(res, 500, { error: e.message || 'Failed' });
+    }
+  }
+
+  // Recording state for a meeting
+  if (urlPath === '/api/recording' && req.method === 'GET') {
+    try {
+      const code = (parsed.searchParams.get('code') || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const meeting = meetings.get(code);
+      const active = meeting?.recording || null;
+      const past = code ? db.getRecordingsForCode(code, 10) : [];
+      return sendJSON(res, 200, { recording: active, past });
+    } catch (e) {
+      return sendJSON(res, 500, { error: e.message || 'Failed' });
+    }
+  }
+
+  // Enhanced history detail already exists; add activity to history detail response
 
   // Static files
   let staticPath = urlPath === '/' ? '/index.html' : urlPath;

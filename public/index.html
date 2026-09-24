@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link rel="stylesheet" href="styles.css?v=20260923chat2">
+  <link rel="stylesheet" href="styles.css?v=20260923phase2">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤝</text></svg>">
 </head>
 <body>
@@ -49,6 +49,12 @@
             <i class="fa-solid fa-ellipsis-vertical"></i>
           </button>
           <div id="moreMenu" class="more-menu hidden" role="menu">
+            <button type="button" class="more-item more-activity hidden" data-action="activity" role="menuitem">
+              <i class="fa-solid fa-timeline"></i> Activity
+            </button>
+            <button type="button" class="more-item more-record hidden" data-action="record" role="menuitem">
+              <i class="fa-solid fa-circle"></i> Record
+            </button>
             <button type="button" class="more-item" data-action="theme" role="menuitem">
               <i class="fa-solid fa-moon"></i> Theme
             </button>
@@ -264,6 +270,23 @@
     </section>
 
     <!-- MEETING -->
+
+    <!-- WAITING ROOM -->
+    <section id="waitingView" class="waiting-view hidden">
+      <div class="waiting-card">
+        <div class="waiting-pulse" aria-hidden="true"></div>
+        <h2>You're in the waiting room</h2>
+        <p class="waiting-code" id="waitingCodeLabel">NDS-869</p>
+        <p class="waiting-sub">The host will let you in when the meeting is ready.</p>
+        <div class="waiting-status">
+          <span class="waiting-dot"></span>
+          <span>Waiting</span>
+        </div>
+        <p class="waiting-hint">You can close this window.</p>
+        <button type="button" id="waitingLeaveBtn" class="btn small-btn">Leave</button>
+      </div>
+    </section>
+
     <main id="meetingView" class="layout hidden">
       <section class="col col-1" id="col1">
         <div class="panel people-panel">
@@ -276,7 +299,17 @@
             </button>
           </h2>
           <div class="content people-content">
+            <input type="search" id="peopleSearch" class="people-search" placeholder="Search participants…" autocomplete="off">
+            <div id="waitingBanner" class="waiting-banner hidden">
+              <span id="waitingBannerText">0 people want to join</span>
+              <button type="button" id="reviewWaitingBtn" class="btn small-btn">Review</button>
+            </div>
+            <div class="people-section-label" id="inMeetingLabel">In meeting</div>
             <ul class="participant-list" id="participantList"></ul>
+            <div class="people-section-label hidden" id="raisedHandsLabel">Raised hands</div>
+            <ul class="participant-list raised-list" id="raisedHandsList"></ul>
+            <div class="people-section-label hidden" id="waitingSectionLabel">Waiting</div>
+            <ul class="participant-list waiting-list" id="waitingList"></ul>
             <div class="side-chat" id="sideChat">
               <div class="chat-header">
                 <i class="fa-regular fa-comments"></i> Chat
@@ -325,6 +358,7 @@
           <div class="content meeting-content">
             <div class="meeting-title-bar">
               <span id="meetingNameLabel" class="meeting-name-label"></span>
+              <span id="recordingBadge" class="recording-badge hidden"><span class="rec-dot"></span> Recording <span id="recordingTimer"></span></span>
               <button id="shareLinkBtn" class="btn small-btn" title="Copy invite link">
                 <i class="fa-solid fa-link"></i> Share
               </button>
@@ -423,9 +457,17 @@
                   <option value="off">Audio only</option>
                 </select>
               </label>
-              <button id="micBtn" class="btn call-btn" title="Toggle microphone">
+              <button id="micBtn" class="btn call-btn" title="Toggle microphone (M)">
                 <i class="fa-solid fa-microphone"></i>
                 <span>Mic</span>
+              </button>
+              <button id="raiseHandBtn" class="btn call-btn" title="Raise hand (H)" aria-pressed="false">
+                <i class="fa-solid fa-hand"></i>
+                <span>Hand</span>
+              </button>
+              <button id="securityBtn" class="btn call-btn hidden" title="Meeting security">
+                <i class="fa-solid fa-shield-halved"></i>
+                <span>Security</span>
               </button>
               <div class="emoji-bar" id="emojiBar">
                 <button type="button" class="emoji-btn" data-emoji="👍" title="Thumbs up">👍</button>
@@ -434,7 +476,7 @@
                 <button type="button" class="emoji-btn" data-emoji="😂" title="Laugh">😂</button>
                 <button type="button" class="emoji-btn" data-emoji="🎉" title="Celebrate">🎉</button>
               </div>
-              <div id="liveStatus" class="live-status" aria-live="polite">
+              <div id="liveStatus" class="live-status" aria-live="polite" title="Connection details" role="button" tabindex="0" data-diag="1">
                 <span class="live-status-dot"></span>
                 <span id="liveStatusText" class="live-status-text">Connecting…</span>
               </div>
@@ -530,6 +572,117 @@
       </form>
       <button type="button" id="nameModalCancel" class="btn small-btn name-modal-cancel">Cancel</button>
     </div>
+
+    <!-- SECURITY DRAWER -->
+    <div id="securityDrawer" class="drawer hidden" aria-hidden="true">
+      <div class="drawer-backdrop" id="securityDrawerBackdrop"></div>
+      <div class="drawer-panel">
+        <div class="drawer-header">
+          <h2><i class="fa-solid fa-shield-halved"></i> Meeting security</h2>
+          <button type="button" id="securityDrawerClose" class="btn icon-btn" title="Close">&times;</button>
+        </div>
+        <div class="drawer-body">
+          <div class="sec-group">
+            <h3>Access</h3>
+            <label class="sec-row"><span>Waiting room</span><input type="checkbox" id="secWaitingRoom"></label>
+            <label class="sec-row"><span>Guest access</span><input type="checkbox" id="secGuestAccess"></label>
+            <label class="sec-row"><span>Meeting locked</span><input type="checkbox" id="secLocked"></label>
+          </div>
+          <div class="sec-group">
+            <h3>Participants</h3>
+            <label class="sec-row"><span>Screen sharing</span><input type="checkbox" id="secScreenShare"></label>
+            <label class="sec-row"><span>Microphone</span><input type="checkbox" id="secMicrophone"></label>
+            <label class="sec-row"><span>Chat</span><input type="checkbox" id="secChat"></label>
+            <label class="sec-row"><span>Reactions</span><input type="checkbox" id="secReactions"></label>
+            <label class="sec-row"><span>Raise hand</span><input type="checkbox" id="secRaiseHand"></label>
+          </div>
+          <div class="sec-group">
+            <h3>Invitations</h3>
+            <label class="sec-row"><span>Participants can invite</span><input type="checkbox" id="secPartInvite"></label>
+            <label class="sec-row"><span>Guests can invite</span><input type="checkbox" id="secGuestInvite"></label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PARTICIPANT CONTEXT MENU -->
+    <div id="participantMenu" class="context-menu hidden" role="menu"></div>
+
+    <!-- REMOVE CONFIRM -->
+    <div id="removeModal" class="modal hidden">
+      <div class="modal-backdrop" id="removeModalBackdrop"></div>
+      <div class="modal-card modal-sm">
+        <h2 id="removeModalTitle">Remove participant?</h2>
+        <p id="removeModalBody" class="modal-sub">They will be disconnected from the meeting.</p>
+        <label class="checkbox-label"><input type="checkbox" id="removePreventRejoin"> Prevent them from rejoining</label>
+        <div class="modal-actions">
+          <button type="button" id="removeCancelBtn" class="btn">Cancel</button>
+          <button type="button" id="removeConfirmBtn" class="btn danger-btn">Remove</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ASK UNMUTE TOAST handled in JS -->
+    
+    <!-- PHASE 2: Activity drawer -->
+    <div id="activityDrawer" class="drawer hidden" aria-hidden="true">
+      <div class="drawer-backdrop" id="activityDrawerBackdrop"></div>
+      <div class="drawer-panel">
+        <div class="drawer-header">
+          <h2><i class="fa-solid fa-timeline"></i> Meeting activity</h2>
+          <button type="button" id="activityDrawerClose" class="btn icon-btn" title="Close">&times;</button>
+        </div>
+        <div class="drawer-body">
+          <ul id="activityList" class="activity-list"></ul>
+          <p id="activityEmpty" class="empty-hint">No activity yet.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- PHASE 2: Connection diagnostics -->
+    <div id="diagDrawer" class="drawer hidden" aria-hidden="true">
+      <div class="drawer-backdrop" id="diagDrawerBackdrop"></div>
+      <div class="drawer-panel">
+        <div class="drawer-header">
+          <h2><i class="fa-solid fa-signal"></i> Connection</h2>
+          <button type="button" id="diagDrawerClose" class="btn icon-btn" title="Close">&times;</button>
+        </div>
+        <div class="drawer-body">
+          <div class="diag-status">
+            <span id="diagDot" class="diag-dot good"></span>
+            <span id="diagLabel">Checking…</span>
+          </div>
+          <div class="diag-grid">
+            <div><span class="diag-k">Latency</span><span id="diagLatency" class="diag-v">—</span></div>
+            <div><span class="diag-k">Audio</span><span id="diagAudio" class="diag-v">—</span></div>
+            <div><span class="diag-k">Video</span><span id="diagVideo" class="diag-v">—</span></div>
+            <div><span class="diag-k">Screen share</span><span id="diagShare" class="diag-v">—</span></div>
+            <div><span class="diag-k">Network</span><span id="diagNetwork" class="diag-v">—</span></div>
+          </div>
+          <p id="diagHint" class="diag-hint"></p>
+        </div>
+      </div>
+    </div>
+
+    <!-- PHASE 2: Record modal -->
+    <div id="recordModal" class="modal hidden">
+      <div class="modal-backdrop" id="recordModalBackdrop"></div>
+      <div class="modal-card modal-sm">
+        <h2>Record meeting</h2>
+        <p class="modal-sub">Participants will be notified.</p>
+        <label class="checkbox-label"><input type="checkbox" id="recAudio" checked> Audio</label>
+        <label class="checkbox-label"><input type="checkbox" id="recVideo" checked> Video</label>
+        <label class="checkbox-label"><input type="checkbox" id="recScreen" checked> Screen sharing</label>
+        <label class="checkbox-label"><input type="checkbox" id="recChat" checked> Chat</label>
+        <div class="modal-actions">
+          <button type="button" id="recordCancelBtn" class="btn">Cancel</button>
+          <button type="button" id="recordStartBtn" class="btn primary-btn">Start recording</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="toastHost" class="toast-host" aria-live="polite"></div>
+
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.9.1/dist/livekit-client.umd.min.js"></script>

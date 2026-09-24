@@ -1,38 +1,48 @@
-# Phase 1 — Modular layout (behavior unchanged)
+# Phase 1 — Core meeting experience + moderation
 
-## Server
+Built on top of the existing Meet modular stack (LiveKit, SQLite, plugins).
 
+## What Phase 1 adds
+
+### Architecture
+- **Roles:** host · co-host · participant · guest
+- **Permission model:** role defaults → meeting overrides → per-user overrides → server authorization
+- **Membership states:** WAITING · ACTIVE · LEFT · REMOVED · BLOCKED
+- **Meeting settings:** waiting room, guest access, lock, screen share / mic / chat / reactions / raise-hand gates, invite permissions
+
+### Server
+- `src/lib/permissions.js` — role defaults + `can()` / `resolvePermissions()`
+- `src/rooms/store.js` — extended meeting object (settings, invite token, blocked sets, raised hands, waiting)
+- `src/plugins/moderation.js` — raise/lower hand, ask-unmute, roles, transfer host, remove, admit/decline, lock, security
+- `/api/create` — accepts advanced settings, returns invite token + link
+- `/api/join` — waiting room, lock, guest access, block/rejoin checks
+- `/api/invite/regenerate` — host regenerates secure link token
+- WS messages: `raise-hand`, `lower-hand`, `lower-all-hands`, `ask-unmute`, `set-role`, `transfer-host`, `remove-participant`, `admit-participant`, `decline-participant`, `admit-all`, `decline-all`, `update-security`, `lock-meeting`, `unlock-meeting`
+
+### Client UI
+- Waiting room view (calm pulse state)
+- People panel sections: In meeting · Raised hands · Waiting
+- Contextual participant menu (mute, ask unmute, role, remove…)
+- Raise-hand control + keyboard **H**
+- Security drawer (shield)
+- Remove confirmation with “prevent rejoin”
+- Toast notifications (admit request, ask-unmute, lock…)
+- Design tokens: `#F7F8FC` / `#625BFF` / `#18B981` / restrained danger
+
+## Still on the Phase 1 backlog / polish
+- Full visual redesign of home/create (advanced settings collapsed)
+- Camera button (LiveKit video path beyond screen+audio)
+- Secure link UI (copy / regenerate) in invite surface
+- Username/email invite search (Accounts integration)
+- Shared-element transitions for multi-share
+- Full mobile bottom-sheet pattern for People/Chat/Security
+
+## Phase 2 (next)
+Meeting activity timeline, connection diagnostics, recording, templates, rich history, per-user permission editor, keyboard shortcut set, org features.
+
+## Run
+```bash
+npm install
+cp .env.example .env
+node server.js
 ```
-server.js                 # entry → require('./src').start()
-src/
-  index.js                # HTTP + WS + cleanup
-  config.js
-  lib/http.js
-  lib/auth.js
-  rooms/store.js          # meetings Map, broadcast, codes
-  rooms/lifecycle.js      # endMeeting, inactivity cleanup
-  livekit/tokens.js
-  http/routes.js          # all REST + static
-  ws/hub.js               # WebSocket handlers
-  features/               # Phase 2 homes (docs only for now)
-db.js                     # SQLite (unchanged path)
-```
-
-## Client
-
-```
-public/js/
-  lib/events.js           # MeetBus
-  main.js                 # boot log
-  features/*.js           # manifests (ids + message types)
-  core/app.js             # full app logic (former script.js)
-public/script.js          # deprecated stub
-```
-
-## Deploy
-
-Dockerfile copies `src/` and `public/`. Still: `node server.js`.
-
-## Phase 2 next
-
-Move handlers from `ws/hub.js` / `core/app.js` into `register(ctx)` plugins + feature flags.

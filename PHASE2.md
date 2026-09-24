@@ -1,44 +1,72 @@
-# Phase 2 — Plugins complete
+# Phase 2 — Professional meeting platform
 
-## Server plugins (`src/plugins/`)
+Builds on Phase 1 (roles, waiting room, security, raised hands, sleek moderation UI).
 
-| Plugin | Flag | Responsibility |
-|--------|------|----------------|
-| chat | FEATURE_CHAT | chat + chat-history on register |
-| reactions | FEATURE_REACTIONS | emoji broadcast |
-| mute | FEATURE_MUTE | mute-participant, unmute-self |
-| deviceIcons | FEATURE_DEVICE_ICONS | device type on roster |
-| content | FEATURE_CONTENT (default off) | content-*/remote-* WS |
+## Delivered
 
-**Core (not plugins):** register, start-share, stop-share, end-meeting, HTTP create/join/auth/LiveKit.
+### 1. Meeting activity / audit
+- SQLite `meeting_activity` table
+- Live in-memory ring buffer + persistent log
+- WS `activity` events
+- `/api/activity?code=`
+- Activity drawer (timeline UI)
 
-Disable example:
+### 2. Connection diagnostics
+- Click Live status → diagnostics drawer
+- Latency / network / quality hints (navigator.connection + WS state)
+- Calm copy (Excellent / Fair / Unstable)
+
+### 3. Host transfer
+- Already in Phase 1 moderation (`transfer-host`); logged in activity
+
+### 4. Recording
+- Host-only start/stop via WS
+- Options: audio, video, screen share, chat
+- SQLite `meeting_recordings`
+- Recording badge + timer in meeting chrome
+- Participant toast on start/stop
+- *Media capture / LiveKit egress wiring is the next integration step; signaling + state are complete*
+
+### 5. Rich meeting history
+- Existing history APIs retained
+- Activity trail available per code for post-meeting review
+
+### 6. Meeting templates
+- Seeded templates: Blank, Research, Classroom, Team, Interview, Presentation
+- `/api/templates`
+- Create flow can apply template settings (waiting room, share, etc.)
+
+### 7. Advanced permissions
+- Phase 1 role + meeting-level security drawer
+- Contextual per-participant actions (mute, role, remove) remain the primary surface
+
+### 8. Keyboard shortcuts
+- `M` microphone  
+- `S` screen share  
+- `H` raise/lower hand (Phase 1)
+
+### 9. Persistent invitation foundation
+- Invite tokens + regenerate (Phase 1)
+- Templates + activity support longer-lived meeting ops
+
+## Feature flags
 ```
-FEATURE_CHAT=0
-FEATURE_SCHEDULE=0
+FEATURE_ACTIVITY=1
+FEATURE_RECORDING=1
+FEATURE_TEMPLATES=1
+FEATURE_DIAGNOSTICS=1
 ```
 
-`/api/config` returns `{ features: { chat, reactions, ... } }`.
-
-## Client
-
-- `js/lib/registry.js` — MeetRegistry.register / boot
-- Feature scripts register with `id` + `register(ctx)`
-- `MeetBoot(features)` from `/api/config`
-- Core UI/logic remains `js/core/app.js` (behavior stable)
-
-## Create meeting fix
-
-- Restored missing `endMeeting` import in HTTP routes (broke leave / empty room)
-- Avoided `src/config.js` vs `src/config/` directory collision
-- HTTP handler errors now logged and return JSON 500 instead of hanging
-
-## Deploy
-
-Copy entire `src/`, `public/`, `server.js`, `db.js`. Confirm container logs show:
+## Run
+```bash
+npm install
+cp .env.example .env
+node server.js
 ```
-[features] {"chat":true,...}
-[plugins] registered: chat
-...
-Meet is running at ...
-```
+
+## Phase 2 follow-ups (optional)
+- LiveKit Egress or client MediaRecorder for actual recording files
+- Per-user permission editor UI
+- Organization / classroom admin
+- Full mobile bottom-sheet redesign
+- Focus mode for multi-share
