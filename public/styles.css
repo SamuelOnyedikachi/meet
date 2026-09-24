@@ -4114,15 +4114,19 @@ body.dark #meetingView .people-search {
 }
 .tab-toolbar .people-search { flex: 1; margin: 0; }
 
-/* Chat tab fills height */
+/* Chat tab fills height — no panel border (flush with People / Notifications) */
 #chatTab .side-chat {
   display: flex;
   flex-direction: column;
   flex: 1;
   min-height: 0;
-  border: none;
-  padding: 0;
-  margin: 0;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  overflow: visible !important;
 }
 #chatTab .chat-messages {
   flex: 1;
@@ -4130,6 +4134,7 @@ body.dark #meetingView .people-search {
   overflow-y: auto;
 }
 #chatTab .chat-form { flex-shrink: 0; margin-top: 0.4rem; }
+#chatTab .chat-header { display: none !important; }
 
 /* Media pre-send preview bar */
 .media-preview-bar {
