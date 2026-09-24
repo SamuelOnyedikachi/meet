@@ -98,7 +98,25 @@ db.exec(`
     status TEXT NOT NULL DEFAULT 'recording',
     FOREIGN KEY (meeting_history_id) REFERENCES meeting_history(id) ON DELETE SET NULL
   );
+
   CREATE INDEX IF NOT EXISTS idx_rec_code ON meeting_recordings(code);
+
+  CREATE TABLE IF NOT EXISTS meeting_membership (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT NOT NULL,
+    user_id INTEGER,
+    participant_id TEXT,
+    display_name TEXT,
+    role TEXT NOT NULL DEFAULT 'participant',
+    status TEXT NOT NULL DEFAULT 'ACTIVE',
+    email TEXT,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(code, user_id),
+    UNIQUE(code, participant_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_membership_code ON meeting_membership(code);
+  CREATE INDEX IF NOT EXISTS idx_membership_user ON meeting_membership(user_id);
+
 
   CREATE TABLE IF NOT EXISTS meeting_templates (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -375,6 +393,55 @@ function getTemplateBySlug(slug) {
 
 // Enhanced history with duration helper is client-side; ensure getHistory returns fields
 
+
+// ----- Membership (persistent) -----
+function upsertMembership({ code, userId, participantId, displayName, role, status, email }) {
+  const existing = userId
+    ? db.prepare(`SELECT * FROM meeting_membership WHERE code = ? AND user_id = ?`).get(code, userId)
+    : db.prepare(`SELECT * FROM meeting_membership WHERE code = ? AND participant_id = ?`).get(code, participantId);
+  if (existing) {
+    db.prepare(`
+      UPDATE meeting_membership
+      SET display_name = COALESCE(?, display_name),
+          role = COALESCE(?, role),
+          status = COALESCE(?, status),
+          participant_id = COALESCE(?, participant_id),
+          email = COALESCE(?, email),
+          updated_at = datetime('now')
+      WHERE id = ?
+    `).run(displayName || null, role || null, status || null, participantId || null, email || null, existing.id);
+    return db.prepare(`SELECT * FROM meeting_membership WHERE id = ?`).get(existing.id);
+  }
+  const info = db.prepare(`
+    INSERT INTO meeting_membership (code, user_id, participant_id, display_name, role, status, email)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(code, userId || null, participantId || null, displayName || null, role || 'participant', status || 'ACTIVE', email || null);
+  return db.prepare(`SELECT * FROM meeting_membership WHERE id = ?`).get(info.lastInsertRowid);
+}
+
+function getMembership(code, { userId, participantId } = {}) {
+  if (userId) {
+    return db.prepare(`SELECT * FROM meeting_membership WHERE code = ? AND user_id = ?`).get(code, userId);
+  }
+  if (participantId) {
+    return db.prepare(`SELECT * FROM meeting_membership WHERE code = ? AND participant_id = ?`).get(code, participantId);
+  }
+  return null;
+}
+
+function listMembership(code) {
+  return db.prepare(`SELECT * FROM meeting_membership WHERE code = ? ORDER BY updated_at DESC`).all(code);
+}
+
+function setMembershipStatus(code, { userId, participantId, status }) {
+  if (userId) {
+    db.prepare(`UPDATE meeting_membership SET status = ?, updated_at = datetime('now') WHERE code = ? AND user_id = ?`).run(status, code, userId);
+  } else if (participantId) {
+    db.prepare(`UPDATE meeting_membership SET status = ?, updated_at = datetime('now') WHERE code = ? AND participant_id = ?`).run(status, code, participantId);
+  }
+}
+
+
 module.exports = {
   db,
   DB_PATH,
@@ -407,4 +474,8 @@ module.exports = {
   getRecordingsForCode,
   listTemplates,
   getTemplateBySlug,
+  upsertMembership,
+  getMembership,
+  listMembership,
+  setMembershipStatus,
 };

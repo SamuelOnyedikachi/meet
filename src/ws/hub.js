@@ -18,6 +18,7 @@ const {
   clients,
 } = require('../rooms/store');
 const { endMeeting } = require('../rooms/lifecycle');
+const { can } = require('../lib/permissions');
 const { registerBuiltinPlugins, loadAll } = require('../plugins');
 
 function createPluginContext() {
@@ -127,7 +128,11 @@ function attachWebSocket(server) {
 
       if (msg.type === 'start-share') {
         const p = meeting.participants.get(participantId);
-        if (p) {
+        if (p && p.status === 'ACTIVE') {
+          if (!can(meeting, p, 'screenShare')) {
+            try { ws.send(JSON.stringify({ type: 'error', error: 'Screen sharing is not allowed' })); } catch (_) {}
+            return;
+          }
           p.sharing = true;
           broadcast(meetingCode, {
             type: 'share-started',
@@ -152,6 +157,29 @@ function attachWebSocket(server) {
           });
           if (typeof ctx.logActivity === 'function') {
             try { ctx.logActivity(meeting, 'share_stopped', p); } catch (_) {}
+          }
+        }
+        return;
+      }
+
+      if (msg.type === 'force-stop-share') {
+        const actor = meeting.participants.get(participantId);
+        const targetId = msg.targetId;
+        const target = meeting.participants.get(targetId);
+        if (actor && target && (can(meeting, actor, 'muteOthers') || actor.role === 'host' || actor.role === 'cohost')) {
+          target.sharing = false;
+          sendToParticipant(targetId, {
+            type: 'force-stop-share',
+            by: participantId,
+            byName: actor.name,
+          });
+          broadcast(meetingCode, {
+            type: 'share-stopped',
+            participantId: targetId,
+            participants: getParticipantsList(meeting),
+          });
+          if (typeof ctx.logActivity === 'function') {
+            try { ctx.logActivity(meeting, 'share_stopped', actor, { forced: true, targetId }); } catch (_) {}
           }
         }
         return;

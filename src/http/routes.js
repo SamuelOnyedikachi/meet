@@ -396,6 +396,7 @@ function createRequestHandler() {
         participantsCanInvite: !!body.participantsCanInvite,
         guestsCanInvite: !!body.guestsCanInvite,
       });
+      const requireInviteKey = body.requireInviteKey === true || body.inviteAccess === 'approval';
 
       const host = createParticipant({
         id: hostId,
@@ -426,6 +427,7 @@ function createRequestHandler() {
         settings,
         inviteToken,
         inviteAccess: body.inviteAccess || 'anyone', // anyone | approval
+        requireInviteKey: !!requireInviteKey,
         blocked: {
           participantIds: new Set(),
           userIds: new Set(),
@@ -442,6 +444,18 @@ function createRequestHandler() {
       }
 
       const meeting = meetings.get(code);
+      try {
+        db.upsertMembership({
+          code,
+          userId: authUser ? authUser.id : null,
+          participantId: hostId,
+          displayName: hostName,
+          role: 'host',
+          status: 'ACTIVE',
+          email: authUser?.email || null,
+        });
+      } catch (e) { console.warn('[membership] host', e.message); }
+
       return sendJSON(res, 200, {
         code,
         letters: code.slice(0, 3),
@@ -456,6 +470,7 @@ function createRequestHandler() {
         security: getSecurityState(meeting),
         inviteToken,
         inviteLink: `/${code.slice(0, 3)}-${code.slice(3)}?key=${inviteToken}`,
+        permissions: resolvePermissions(meeting, host),
         content: null,
       });
     } catch (e) {
@@ -483,6 +498,15 @@ function createRequestHandler() {
       const meeting = meetings.get(code);
       if (!meeting) return sendJSON(res, 404, { error: 'Meeting not found. Check the code.' });
 
+      // Secure invite key enforcement
+      const providedKey = body.key || body.inviteToken || null;
+      const requireKey = meeting.inviteAccess === 'approval' || meeting.requireInviteKey === true;
+      if (requireKey) {
+        if (!providedKey || providedKey !== meeting.inviteToken) {
+          return sendJSON(res, 403, { error: 'A valid invitation link is required to join this meeting.' });
+        }
+      }
+
       const authUser = await getAuthUser(req);
       const participantId = body.participantId || 'user-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
       const participantName = normalizeParticipantName(
@@ -500,6 +524,18 @@ function createRequestHandler() {
         participantId,
         name: participantName,
       })) {
+        return sendJSON(res, 403, { error: 'You no longer have access to this meeting.' });
+      }
+
+      // Persistent membership: blocked/removed in DB
+      let membership = null;
+      try {
+        membership = db.getMembership(code, {
+          userId: authUser ? authUser.id : null,
+          participantId,
+        });
+      } catch (_) {}
+      if (membership && (membership.status === 'BLOCKED' || membership.status === 'REMOVED')) {
         return sendJSON(res, 403, { error: 'You no longer have access to this meeting.' });
       }
 
@@ -583,6 +619,17 @@ function createRequestHandler() {
           participant: { id: pid, name: participantName, role, isGuest },
           waiting: getWaitingList(meeting),
         });
+        try {
+          db.upsertMembership({
+            code,
+            userId: authUser ? authUser.id : null,
+            participantId: pid,
+            displayName: participantName,
+            role,
+            status: 'WAITING',
+            email: authUser?.email || null,
+          });
+        } catch (_) {}
         return sendJSON(res, 200, {
           code,
           letters: code.slice(0, 3),
@@ -597,6 +644,25 @@ function createRequestHandler() {
           security: getSecurityState(meeting),
           content: null,
         });
+      }
+
+      try {
+        db.upsertMembership({
+          code,
+          userId: authUser ? authUser.id : null,
+          participantId: pid,
+          displayName: participantName,
+          role: participant.role,
+          status: status,
+          email: authUser?.email || null,
+        });
+      } catch (e) { console.warn('[membership] join', e.message); }
+
+      // Restore role from membership if previously cohost/host
+      if (membership && (membership.role === 'cohost' || membership.role === 'host') && membership.status === 'ACTIVE') {
+        participant.role = membership.role;
+        participant.isHost = membership.role === 'host';
+        meeting.participants.set(pid, participant);
       }
 
       broadcast(code, {
@@ -620,6 +686,7 @@ function createRequestHandler() {
         security: getSecurityState(meeting),
         content: getContentState(meeting),
         permissions: resolvePermissions(meeting, participant),
+        previouslyJoined: !!(membership && membership.status === 'ACTIVE'),
       });
     } catch (e) {
       console.error('[join]', e);

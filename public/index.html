@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link rel="stylesheet" href="styles.css?v=20260923phase2">
+  <link rel="stylesheet" href="styles.css?v=20260924p2full">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤝</text></svg>">
 </head>
 <body>
@@ -49,6 +49,9 @@
             <i class="fa-solid fa-ellipsis-vertical"></i>
           </button>
           <div id="moreMenu" class="more-menu hidden" role="menu">
+            <button type="button" class="more-item more-activity hidden" data-action="invite" role="menuitem">
+              <i class="fa-solid fa-user-plus"></i> Invite
+            </button>
             <button type="button" class="more-item more-activity hidden" data-action="activity" role="menuitem">
               <i class="fa-solid fa-timeline"></i> Activity
             </button>
@@ -166,7 +169,18 @@
               <div class="form-block">
                 <input id="createName" type="text" maxlength="60" placeholder="Meeting name (e.g. Design review)" autocomplete="off" aria-label="Meeting name">
                 <input id="createYourName" type="text" maxlength="40" placeholder="Your name" autocomplete="off" aria-label="Your name">
-                <button id="createBtn" class="btn primary-btn landing-main-btn">
+                
+            <button type="button" id="createAdvancedToggle" class="btn small-btn" style="margin-bottom:0.5rem">Advanced settings</button>
+            <div id="createAdvanced" class="create-advanced hidden">
+              <label class="checkbox-label"><input type="checkbox" id="advWaitingRoom"> Waiting room</label>
+              <label class="checkbox-label"><input type="checkbox" id="advGuestAccess" checked> Guest access</label>
+              <label class="checkbox-label"><input type="checkbox" id="advScreenShare" checked> Participant screen sharing</label>
+              <label class="checkbox-label"><input type="checkbox" id="advMic" checked> Participant microphone</label>
+              <label class="checkbox-label"><input type="checkbox" id="advChat" checked> Chat</label>
+              <label class="checkbox-label"><input type="checkbox" id="advReactions" checked> Reactions</label>
+              <label class="checkbox-label"><input type="checkbox" id="advRequireKey"> Require invitation link</label>
+            </div>
+<button id="createBtn" class="btn primary-btn landing-main-btn">
                   <span>Create meeting</span><i class="fa-solid fa-arrow-right"></i>
                 </button>
                 <p id="createError" class="error-msg hidden"></p>
@@ -310,7 +324,7 @@
             <ul class="participant-list raised-list" id="raisedHandsList"></ul>
             <div class="people-section-label hidden" id="waitingSectionLabel">Waiting</div>
             <ul class="participant-list waiting-list" id="waitingList"></ul>
-            <div class="side-chat" id="sideChat">
+            <div class="side-chat" id="sideChat" data-drawer-chat="1">
               <div class="chat-header">
                 <i class="fa-regular fa-comments"></i> Chat
               </div>
@@ -460,6 +474,10 @@
               <button id="micBtn" class="btn call-btn" title="Toggle microphone (M)">
                 <i class="fa-solid fa-microphone"></i>
                 <span>Mic</span>
+              </button>
+              <button id="cameraBtn" class="btn call-btn" title="Toggle camera (V)" aria-pressed="false">
+                <i class="fa-solid fa-video"></i>
+                <span>Cam</span>
               </button>
               <button id="raiseHandBtn" class="btn call-btn" title="Raise hand (H)" aria-pressed="false">
                 <i class="fa-solid fa-hand"></i>
@@ -679,6 +697,36 @@
           <button type="button" id="recordStartBtn" class="btn primary-btn">Start recording</button>
         </div>
       </div>
+    </div>
+
+    
+    <!-- INVITE DRAWER (P1) -->
+    <div id="inviteDrawer" class="drawer hidden" aria-hidden="true">
+      <div class="drawer-backdrop" id="inviteDrawerBackdrop"></div>
+      <div class="drawer-panel">
+        <div class="drawer-header">
+          <h2><i class="fa-solid fa-user-plus"></i> Invite people</h2>
+          <button type="button" id="inviteDrawerClose" class="btn icon-btn" title="Close">&times;</button>
+        </div>
+        <div class="drawer-body">
+          <p class="modal-sub">Secure meeting link</p>
+          <div class="invite-link-box">
+            <input type="text" id="inviteLinkInput" readonly class="invite-link-input">
+            <button type="button" id="copyInviteBtn" class="btn small-btn primary-outline">Copy link</button>
+            <button type="button" id="regenInviteBtn" class="btn small-btn">Regenerate</button>
+          </div>
+          <label class="sec-row" style="margin-top:1rem"><span>Require invitation link</span>
+            <input type="checkbox" id="inviteRequireKey">
+          </label>
+          <p class="waiting-hint">Regenerating invalidates the previous link.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- REJOIN BAR -->
+    <div id="rejoinBar" class="rejoin-bar hidden">
+      <p>You previously joined this meeting.</p>
+      <button type="button" id="rejoinBtn" class="btn primary-btn">Rejoin</button>
     </div>
 
     <div id="toastHost" class="toast-host" aria-live="polite"></div>

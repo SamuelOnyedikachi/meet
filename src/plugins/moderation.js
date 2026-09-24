@@ -104,6 +104,18 @@ module.exports = {
       if (newRole !== 'cohost' && newRole !== 'participant' && newRole !== 'guest') return;
       target.role = newRole;
       target.isHost = false;
+      try {
+        if (ctx.db) {
+          ctx.db.upsertMembership({
+            code: meetingCode,
+            userId: target.userId,
+            participantId: targetId,
+            displayName: target.name,
+            role: newRole,
+            status: 'ACTIVE',
+          });
+        }
+      } catch (_) {}
       emitRoster(meetingCode, meeting);
       broadcast(meetingCode, {
         type: 'role-changed',
@@ -147,6 +159,15 @@ module.exports = {
 
       const preventRejoin = !!msg.preventRejoin;
       blockParticipant(meeting, target, { preventRejoin });
+      try {
+        if (ctx.db) {
+          ctx.db.setMembershipStatus(meetingCode, {
+            userId: target.userId,
+            participantId: targetId,
+            status: preventRejoin ? 'BLOCKED' : 'REMOVED',
+          });
+        }
+      } catch (_) {}
 
       sendToParticipant(targetId, {
         type: 'removed',
@@ -296,6 +317,29 @@ module.exports = {
       meeting.settings.locked = false;
       emitSecurity(meetingCode, meeting);
       broadcast(meetingCode, { type: 'meeting-locked', locked: false });
+    });
+
+    // Per-user permission overrides (Phase 2)
+    ctx.onWs('set-participant-permissions', ({ msg, participantId, meeting, meetingCode }) => {
+      const actor = meeting.participants.get(participantId);
+      if (!actor || !can(meeting, actor, 'manageRoles')) return;
+      const targetId = msg.targetId;
+      const target = meeting.participants.get(targetId);
+      if (!target || target.role === 'host') return;
+      const patch = msg.permissions || {};
+      target.permissionOverrides = target.permissionOverrides || {};
+      ['microphone', 'camera', 'screenShare', 'chat', 'reactions', 'raiseHand'].forEach((k) => {
+        if (typeof patch[k] === 'boolean') target.permissionOverrides[k] = patch[k];
+      });
+      emitRoster(meetingCode, meeting);
+      sendToParticipant(targetId, {
+        type: 'permissions-updated',
+        permissions: require('../lib/permissions').resolvePermissions(meeting, target),
+      });
+      broadcast(meetingCode, {
+        type: 'participants',
+        participants: getParticipantsList(meeting),
+      });
     });
 
     // Enhanced mute — require permission

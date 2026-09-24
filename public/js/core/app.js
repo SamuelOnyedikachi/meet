@@ -653,19 +653,34 @@
       if (msg.type === 'admitted') {
         hideWaitingRoom();
         if (msg.participants) participants = msg.participants;
+        if (msg.waiting) waitingList = msg.waiting;
         showToast('You were admitted to the meeting');
-        // Enter meeting UI if we were waiting
         try {
-          if (typeof enterMeetingUI === 'function') enterMeetingUI();
-          else {
-            document.getElementById('waitingView')?.classList.add('hidden');
-            document.getElementById('meetingView')?.classList.remove('hidden');
-            document.getElementById('homeView')?.classList.add('hidden');
+          const mv = document.getElementById('meetingView');
+          const hv = document.getElementById('homeView');
+          const wv = document.getElementById('waitingView');
+          if (wv) wv.classList.add('hidden');
+          if (hv) hv.classList.add('hidden');
+          if (mv) mv.classList.remove('hidden');
+          leaveBtn?.classList.remove('hidden');
+          if (meetingBadge && currentMeeting) {
+            meetingBadge.textContent = formatCode(currentMeeting.letters, currentMeeting.numbers);
+            meetingBadge.classList.remove('hidden');
           }
+          copyCodeBtn?.classList.remove('hidden');
+          if (currentMeeting) {
+            const me = participants.find((p) => p.id === currentMeeting.participantId);
+            if (me) {
+              myRole = me.role || myRole;
+              if (me.permissions) myPermissions = me.permissions;
+            }
+          }
+          renderParticipants();
+          renderCards();
           connectWS();
+          startPolling();
           connectLiveKit();
-        } catch (e) { console.warn(e); }
-        renderParticipants();
+        } catch (e) { console.warn('[admitted]', e); }
         return;
       }
       if (msg.type === 'security-updated' || msg.type === 'meeting-locked') {
@@ -698,6 +713,24 @@
       }
       if (msg.type === 'force-mute') {
         forceMuteLocal(msg);
+        return;
+      }
+      if (msg.type === 'permissions-updated') {
+        if (msg.permissions) myPermissions = msg.permissions;
+        showToast('Your permissions were updated');
+        return;
+      }
+      if (msg.type === 'force-stop-share') {
+        try {
+          if (typeof isSharing !== 'undefined' && isSharing && typeof stopShare === 'function') {
+            stopShare();
+          }
+          showToast((msg.byName || 'Host') + ' stopped your screen share');
+        } catch (_) {}
+        return;
+      }
+      if (msg.type === 'error' && msg.error) {
+        showToast(msg.error);
         return;
       }
       if (msg.type === 'content-state') {
@@ -1523,7 +1556,17 @@
     const myId = currentMeeting?.participantId;
     const canModerate = !!(myPermissions.muteOthers || myPermissions.removePeople || myPermissions.manageWaiting || myPermissions.manageRoles);
 
-    const sorted = [...participants].sort((a, b) => {
+    const searchEl = document.getElementById('peopleSearch');
+    const q = (searchEl && searchEl.value ? searchEl.value : '').trim().toLowerCase();
+    let listSrc = participants;
+    if (q) {
+      listSrc = participants.filter((p) =>
+        String(p.name || '').toLowerCase().includes(q) ||
+        String(p.roleLabel || p.role || '').toLowerCase().includes(q)
+      );
+    }
+
+    const sorted = [...listSrc].sort((a, b) => {
       const rank = (p) => (p.role === 'host' || p.isHost ? 0 : p.role === 'cohost' ? 1 : 2);
       const ra = rank(a), rb = rank(b);
       if (ra !== rb) return ra - rb;
@@ -1576,6 +1619,16 @@
       if (raisedHands && raisedHands.length) {
         raisedLabel.classList.remove('hidden');
         raisedLabel.textContent = `Raised hands · ${raisedHands.length}`;
+        if (myPermissions.lowerHands && raisedListEl && !document.getElementById('lowerAllHandsBtn')) {
+          const lowerAll = document.createElement('button');
+          lowerAll.type = 'button';
+          lowerAll.id = 'lowerAllHandsBtn';
+          lowerAll.className = 'btn small-btn';
+          lowerAll.textContent = 'Lower all';
+          lowerAll.style.marginBottom = '0.35rem';
+          lowerAll.addEventListener('click', () => sendWS({ type: 'lower-all-hands' }));
+          raisedListEl.parentNode?.insertBefore(lowerAll, raisedListEl);
+        }
         raisedHands.forEach((h, i) => {
           const p = participants.find((x) => x.id === h.id) || h;
           const li = document.createElement('li');
@@ -1602,6 +1655,26 @@
       if (waitingList && waitingList.length && myPermissions.manageWaiting) {
         waitingLabel.classList.remove('hidden');
         waitingLabel.textContent = `Waiting · ${waitingList.length}`;
+        // Bulk actions once
+        if (!document.getElementById('waitingBulkActions') && waitingListEl) {
+          const bulk = document.createElement('div');
+          bulk.id = 'waitingBulkActions';
+          bulk.className = 'waiting-bulk';
+          bulk.innerHTML = '';
+          const admitAll = document.createElement('button');
+          admitAll.type = 'button';
+          admitAll.className = 'btn small-btn primary-outline';
+          admitAll.textContent = 'Admit all';
+          admitAll.addEventListener('click', () => sendWS({ type: 'admit-all' }));
+          const declineAll = document.createElement('button');
+          declineAll.type = 'button';
+          declineAll.className = 'btn small-btn';
+          declineAll.textContent = 'Decline all';
+          declineAll.addEventListener('click', () => sendWS({ type: 'decline-all' }));
+          bulk.appendChild(admitAll);
+          bulk.appendChild(declineAll);
+          waitingListEl.parentNode?.insertBefore(bulk, waitingListEl);
+        }
         waitingList.forEach((p) => {
           const li = document.createElement('li');
           li.className = 'participant-item';
@@ -1744,6 +1817,14 @@
     };
     myRole = currentMeeting.role;
     myPermissions = data.permissions || {};
+    // Host must always have full moderation surface even if API omits permissions
+    if ((isHost || data.role === 'host' || currentMeeting.isHost) && (!myPermissions || !myPermissions.manageSecurity)) {
+      myPermissions = Object.assign({
+        microphone: true, camera: true, screenShare: true, chat: true, reactions: true, raiseHand: true,
+        invite: true, muteOthers: true, removePeople: true, manageWaiting: true, manageRoles: true,
+        manageSecurity: true, lockMeeting: true, endMeeting: true, transferHost: true, lowerHands: true, askUnmute: true,
+      }, myPermissions || {});
+    }
     participants = data.participants || [];
     waitingList = data.waiting || [];
     raisedHands = data.raisedHands || [];
@@ -1927,10 +2008,25 @@
     createBtn.disabled = true;
     try {
       const tmpl = (typeof getSelectedTemplateSettings === 'function') ? getSelectedTemplateSettings() : {};
+      const adv = {
+        waitingRoom: !!document.getElementById('advWaitingRoom')?.checked,
+        guestAccess: document.getElementById('advGuestAccess') ? !!document.getElementById('advGuestAccess').checked : true,
+        participantScreenShare: document.getElementById('advScreenShare') ? !!document.getElementById('advScreenShare').checked : true,
+        participantMicrophone: document.getElementById('advMic') ? !!document.getElementById('advMic').checked : true,
+        chat: document.getElementById('advChat') ? !!document.getElementById('advChat').checked : true,
+        reactions: document.getElementById('advReactions') ? !!document.getElementById('advReactions').checked : true,
+        requireInviteKey: !!document.getElementById('advRequireKey')?.checked,
+        inviteAccess: document.getElementById('advRequireKey')?.checked ? 'approval' : 'anyone',
+      };
       const data = await api('/api/create', {
         method: 'POST',
-        body: JSON.stringify(Object.assign({ name, participantName: yourName, device: detectDevice() }, tmpl)),
+        body: JSON.stringify(Object.assign({ name, participantName: yourName, device: detectDevice() }, tmpl, adv)),
       });
+      if (data.inviteToken) {
+        try { sessionStorage.setItem('meet-invite-' + data.code, data.inviteToken); } catch (_) {}
+        window.__lastInviteToken = data.inviteToken;
+        window.__lastInviteLink = data.inviteLink;
+      }
       await showMeeting(data, true, { participantName: yourName });
     } catch (e) {
       showError(createError, e.message);
@@ -3330,6 +3426,11 @@
         } else {
           html += `<button type="button" data-act="remove-cohost"><i class="fa-solid fa-user"></i> Remove co-host</button>`;
         }
+        const pp = p.permissions || {};
+        html += `<div class="menu-sep"></div><div class="menu-sub">Permissions</div>`;
+        html += `<label class="perm-row"><span>Microphone</span><input type="checkbox" data-perm="microphone" ${pp.microphone !== false ? 'checked' : ''}></label>`;
+        html += `<label class="perm-row"><span>Screen share</span><input type="checkbox" data-perm="screenShare" ${pp.screenShare !== false ? 'checked' : ''}></label>`;
+        html += `<label class="perm-row"><span>Chat</span><input type="checkbox" data-perm="chat" ${pp.chat !== false ? 'checked' : ''}></label>`;
       }
       if (myRole === 'host' && role !== 'host') {
         html += `<button type="button" data-act="transfer-host"><i class="fa-solid fa-crown"></i> Transfer host</button>`;
@@ -3347,12 +3448,24 @@
     menu.style.top = Math.min(y, window.innerHeight - mh - pad) + 'px';
 
     menu.onclick = (e) => {
+      const permInput = e.target.closest('input[data-perm]');
+      if (permInput) {
+        e.stopPropagation();
+        const key = permInput.getAttribute('data-perm');
+        const permissions = {};
+        menu.querySelectorAll('input[data-perm]').forEach((inp) => {
+          permissions[inp.getAttribute('data-perm')] = !!inp.checked;
+        });
+        sendWS({ type: 'set-participant-permissions', targetId: p.id, permissions });
+        return;
+      }
       const btn = e.target.closest('button[data-act]');
       if (!btn) return;
       const act = btn.getAttribute('data-act');
       if (act === 'mute') sendWS({ type: 'mute-participant', targetId: p.id });
       if (act === 'ask-unmute') sendWS({ type: 'ask-unmute', targetId: p.id });
       if (act === 'lower-hand') sendWS({ type: 'lower-hand', targetId: p.id });
+      if (act === 'stop-share') sendWS({ type: 'force-stop-share', targetId: p.id });
       if (act === 'make-cohost') sendWS({ type: 'set-role', targetId: p.id, role: 'cohost' });
       if (act === 'remove-cohost') sendWS({ type: 'set-role', targetId: p.id, role: 'participant' });
       if (act === 'transfer-host') {
@@ -3398,6 +3511,11 @@
   }
 
   function wirePhase1UI() {
+    const peopleSearch = document.getElementById('peopleSearch');
+    if (peopleSearch && !peopleSearch.dataset.wired) {
+      peopleSearch.dataset.wired = '1';
+      peopleSearch.addEventListener('input', () => renderParticipants());
+    }
     const raiseBtn = document.getElementById('raiseHandBtn');
     if (raiseBtn) {
       raiseBtn.addEventListener('click', () => {
@@ -3652,6 +3770,7 @@
   }
 
   async function refreshDiagnostics() {
+    setTimeout(function(){ if (window.__meetEnhanceDiag) window.__meetEnhanceDiag(); }, 50);
     const label = document.getElementById('diagLabel');
     const dot = document.getElementById('diagDot');
     const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
@@ -3858,6 +3977,246 @@
     document.addEventListener('DOMContentLoaded', wirePhase2UI);
   } else {
     wirePhase2UI();
+  }
+
+
+
+
+  // ========== P0/P1 invite + rejoin + advanced ==========
+  function openInviteDrawer() {
+    const drawer = document.getElementById('inviteDrawer');
+    if (!drawer || !currentMeeting) return;
+    const input = document.getElementById('inviteLinkInput');
+    const code = currentMeeting.code || '';
+    const formatted = code.length === 6 ? code.slice(0, 3) + '-' + code.slice(3) : code;
+    let token = window.__lastInviteToken || '';
+    try { token = token || sessionStorage.getItem('meet-invite-' + code) || ''; } catch (_) {}
+    const origin = location.origin;
+    const link = token
+      ? origin + '/' + formatted + '?key=' + token
+      : origin + '/' + formatted;
+    if (input) input.value = link;
+    drawer.classList.remove('hidden');
+    drawer.setAttribute('aria-hidden', 'false');
+  }
+  function closeInviteDrawer() {
+    const drawer = document.getElementById('inviteDrawer');
+    if (!drawer) return;
+    drawer.classList.add('hidden');
+    drawer.setAttribute('aria-hidden', 'true');
+  }
+
+  function wireInviteAndAdvanced() {
+    document.getElementById('createAdvancedToggle')?.addEventListener('click', () => {
+      document.getElementById('createAdvanced')?.classList.toggle('hidden');
+    });
+    document.getElementById('inviteDrawerClose')?.addEventListener('click', closeInviteDrawer);
+    document.getElementById('inviteDrawerBackdrop')?.addEventListener('click', closeInviteDrawer);
+    document.getElementById('copyInviteBtn')?.addEventListener('click', async () => {
+      const input = document.getElementById('inviteLinkInput');
+      if (!input) return;
+      try {
+        await navigator.clipboard.writeText(input.value);
+        showToast('Link copied');
+      } catch (_) {
+        input.select();
+        document.execCommand('copy');
+        showToast('Link copied');
+      }
+    });
+    document.getElementById('regenInviteBtn')?.addEventListener('click', async () => {
+      if (!currentMeeting) return;
+      try {
+        const data = await api('/api/invite/regenerate', {
+          method: 'POST',
+          body: JSON.stringify({ code: currentMeeting.code, participantId: currentMeeting.participantId }),
+        });
+        window.__lastInviteToken = data.inviteToken;
+        try { sessionStorage.setItem('meet-invite-' + currentMeeting.code, data.inviteToken); } catch (_) {}
+        openInviteDrawer();
+        showToast('Invite link regenerated');
+      } catch (e) {
+        showToast(e.message || 'Could not regenerate');
+      }
+    });
+    // shareLinkBtn opens invite
+    const shareLink = document.getElementById('shareLinkBtn');
+    if (shareLink && !shareLink.dataset.inviteWired) {
+      shareLink.dataset.inviteWired = '1';
+      shareLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openInviteDrawer();
+      });
+    }
+    document.getElementById('moreMenu')?.addEventListener('click', (e) => {
+      const item = e.target.closest('[data-action="invite"]');
+      if (item) openInviteDrawer();
+    });
+
+    // Guest label
+    function updateGuestLabel() {
+      let label = document.getElementById('joinGuestLabel');
+      const nameInput = document.getElementById('joinYourName') || document.querySelector('#joinForm input[type="text"]');
+      if (!nameInput) return;
+      if (!label) {
+        label = document.createElement('div');
+        label.id = 'joinGuestLabel';
+        label.className = 'guest-label hidden';
+        label.textContent = 'Guest';
+        nameInput.parentNode?.appendChild(label);
+      }
+      const loggedIn = !!(typeof currentUser !== 'undefined' && currentUser);
+      label.classList.toggle('hidden', loggedIn);
+    }
+    updateGuestLabel();
+    setInterval(updateGuestLabel, 2000);
+
+    // Rejoin bar when session exists for code in URL
+    try {
+      const sess = typeof loadSession === 'function' ? loadSession() : null;
+      const pathCode = (location.pathname || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+      if (sess && sess.code && pathCode && sess.code === pathCode && !currentMeeting) {
+        const bar = document.getElementById('rejoinBar');
+        if (bar) {
+          bar.classList.remove('hidden');
+          document.getElementById('rejoinBtn')?.addEventListener('click', async () => {
+            bar.classList.add('hidden');
+            const yourName = sess.participantName || (typeof displayNameOf === 'function' ? displayNameOf(currentUser) : 'Guest');
+            const urlKey = new URLSearchParams(location.search).get('key') || sessionStorage.getItem('meet-invite-' + sess.code) || undefined;
+            try {
+              const data = await api('/api/join', {
+                method: 'POST',
+                body: JSON.stringify({
+                  code: sess.code,
+                  participantId: sess.participantId,
+                  participantName: yourName,
+                  key: urlKey,
+                  device: detectDevice(),
+                }),
+              });
+              await showMeeting(data, !!sess.isHost, { participantName: yourName });
+            } catch (e) {
+              showToast(e.message || 'Could not rejoin');
+            }
+          });
+        }
+      }
+    } catch (_) {}
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', wireInviteAndAdvanced);
+  } else {
+    wireInviteAndAdvanced();
+  }
+
+
+
+
+  // ========== Phase 2 full: camera, chat drawer, diagnostics ==========
+  let cameraEnabled = false;
+  let localCameraTrack = null;
+
+  async function toggleCamera() {
+    const btn = document.getElementById('cameraBtn');
+    try {
+      if (!cameraEnabled) {
+        if (typeof LivekitClient === 'undefined' && typeof room === 'undefined') {
+          showToast('Camera needs an active meeting connection');
+          return;
+        }
+        // Prefer LiveKit local participant if room exists
+        const lkRoom = (typeof room !== 'undefined' && room) ? room : null;
+        if (lkRoom && window.LivekitClient) {
+          const track = await window.LivekitClient.createLocalVideoTrack({
+            resolution: window.LivekitClient.VideoPresets.h720.resolution,
+          });
+          await lkRoom.localParticipant.publishTrack(track);
+          localCameraTrack = track;
+          cameraEnabled = true;
+        } else if (navigator.mediaDevices) {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+          localCameraTrack = stream;
+          cameraEnabled = true;
+          showToast('Camera preview on (publish when LiveKit room is ready)');
+        }
+      } else {
+        if (localCameraTrack) {
+          try {
+            if (localCameraTrack.stop) localCameraTrack.stop();
+            if (localCameraTrack.mediaStreamTrack) localCameraTrack.mediaStreamTrack.stop();
+            if (typeof room !== 'undefined' && room && localCameraTrack.kind) {
+              await room.localParticipant.unpublishTrack(localCameraTrack);
+            }
+          } catch (_) {}
+          localCameraTrack = null;
+        }
+        cameraEnabled = false;
+      }
+      if (btn) {
+        btn.setAttribute('aria-pressed', String(cameraEnabled));
+        btn.classList.toggle('active', cameraEnabled);
+      }
+    } catch (e) {
+      showToast(e.message || 'Camera unavailable');
+    }
+  }
+
+  function wirePhase2Full() {
+    document.getElementById('cameraBtn')?.addEventListener('click', toggleCamera);
+
+    // Chat drawer toggle
+    document.getElementById('chatToggleBtn')?.addEventListener('click', () => {
+      const chat = document.getElementById('sideChat');
+      if (!chat) return;
+      chat.classList.toggle('chat-drawer-open');
+    });
+    // Also use chat overlay btn if present
+    document.getElementById('chatOverlayBtn')?.addEventListener('click', () => {
+      const chat = document.getElementById('sideChat');
+      if (chat) chat.classList.toggle('chat-drawer-open');
+    });
+
+    // Keyboard V for camera
+    document.addEventListener('keydown', (e) => {
+      if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+      if (!currentMeeting) return;
+      if (e.key === 'v' || e.key === 'V') {
+        e.preventDefault();
+        toggleCamera();
+      }
+    });
+  }
+
+  // Improve diagnostics with LiveKit if available
+  const _origRefreshDiag = typeof refreshDiagnostics === 'function' ? refreshDiagnostics : null;
+  if (_origRefreshDiag) {
+    // wrap by redefining after
+  }
+  window.__meetEnhanceDiag = function () {
+    try {
+      const lkRoom = (typeof room !== 'undefined') ? room : null;
+      if (lkRoom && lkRoom.engine && lkRoom.engine.client) {
+        // soft indicator that media is connected
+        const el = document.getElementById('diagLabel');
+        const dot = document.getElementById('diagDot');
+        if (lkRoom.state === 'connected') {
+          if (el && el.textContent === 'Checking…') el.textContent = 'Excellent';
+          if (dot) dot.className = 'diag-dot good';
+          const a = document.getElementById('diagAudio');
+          const v = document.getElementById('diagVideo');
+          if (a) a.textContent = 'Connected';
+          if (v) v.textContent = 'Connected';
+        }
+      }
+    } catch (_) {}
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', wirePhase2Full);
+  } else {
+    wirePhase2Full();
   }
 
 
