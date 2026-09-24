@@ -21,8 +21,15 @@
         <button id="copyCodeBtn" class="btn small-btn copy-top hidden" title="Copy meeting code">
           <i class="fa-regular fa-copy"></i>
         </button>
+        <span id="meetingNameTop" class="meeting-name-top hidden"></span>
       </div>
       <div class="controls">
+        <button id="shareLinkBtnTop" class="btn small-btn share-top hidden" title="Copy invite link">
+          <i class="fa-solid fa-link"></i> <span class="share-label">Share</span>
+        </button>
+        <button id="endMeetBtnTop" class="btn small-btn danger-btn end-top hidden" title="End meeting for everyone">
+          <i class="fa-solid fa-phone-slash"></i> <span class="end-label">End</span>
+        </button>
         <div id="authArea" class="auth-area">
           <button id="loginOpenBtn" class="btn small-btn">Log in</button>
           <button id="signupOpenBtn" class="btn small-btn primary-outline">Sign up</button>
@@ -303,62 +310,92 @@
 
     <main id="meetingView" class="layout hidden">
       <section class="col col-1" id="col1">
-        <div class="panel people-panel">
-          <h2>
-            <i class="fa-solid fa-users"></i>
-            People
-            <span id="participantCount" class="count-badge">1</span>
-            <button id="deviceToggle" class="btn icon-btn device-toggle" title="Show device icons" aria-pressed="true">
-              <i class="fa-solid fa-mobile-screen"></i>
+        <div class="panel side-panel people-panel">
+          <nav class="side-tabs" role="tablist">
+            <button type="button" class="side-tab active" data-tab="people" role="tab" aria-selected="true" title="People">
+              <i class="fa-solid fa-users"></i> <span class="tab-label">People</span>
+              <span id="participantCount" class="count-badge">1</span>
             </button>
-          </h2>
-          <div class="content people-content">
-            <input type="search" id="peopleSearch" class="people-search" placeholder="Search participants…" autocomplete="off">
-            <div id="waitingBanner" class="waiting-banner hidden">
-              <span id="waitingBannerText">0 people want to join</span>
-              <button type="button" id="reviewWaitingBtn" class="btn small-btn">Review</button>
-            </div>
-            <div class="people-section-label" id="inMeetingLabel">In meeting</div>
-            <ul class="participant-list" id="participantList"></ul>
-            <div class="people-section-label hidden" id="raisedHandsLabel">Raised hands</div>
-            <ul class="participant-list raised-list" id="raisedHandsList"></ul>
-            <div class="people-section-label hidden" id="waitingSectionLabel">Waiting</div>
-            <ul class="participant-list waiting-list" id="waitingList"></ul>
-            <div class="side-chat" id="sideChat" data-drawer-chat="1">
-              <div class="chat-header">
-                <i class="fa-regular fa-comments"></i> Chat
+            <button type="button" class="side-tab" data-tab="chat" role="tab" aria-selected="false" title="Chat">
+              <i class="fa-regular fa-comments"></i> <span class="tab-label">Chat</span>
+              <span id="chatUnreadBadge" class="count-badge hidden">0</span>
+            </button>
+            <button type="button" class="side-tab" data-tab="notifications" role="tab" aria-selected="false" title="Notifications">
+              <i class="fa-regular fa-bell"></i> <span class="tab-label">Notifications</span>
+              <span id="notifUnreadBadge" class="count-badge hidden">0</span>
+            </button>
+          </nav>
+          <div class="side-tab-panels">
+            <!-- PEOPLE TAB -->
+            <div class="side-tab-panel active" id="peopleTab" data-tab="people" role="tabpanel">
+              <div class="tab-toolbar">
+                <input type="search" id="peopleSearch" class="people-search" placeholder="Search participants…" autocomplete="off">
+                <button id="deviceToggle" class="btn icon-btn device-toggle" title="Show device icons" aria-pressed="true">
+                  <i class="fa-solid fa-mobile-screen"></i>
+                </button>
               </div>
-              <div class="chat-messages" id="chatMessages"></div>
-              <div id="mentionMenu" class="mention-menu hidden" role="listbox"></div>
-              <form class="chat-form" id="chatForm">
-                <div class="chat-form-row chat-form-row-input">
-                  <input id="chatInput" type="text" maxlength="2000" placeholder="Message… (@ to mention)" autocomplete="off">
-                  <button type="submit" class="btn icon-btn chat-send-btn" title="Send"><i class="fa-solid fa-paper-plane"></i></button>
-                </div>
-                <div class="chat-form-row chat-form-row-tools">
-                  <button type="button" id="chatImageBtn" class="btn icon-btn" title="Send image (WebP)">
-                    <i class="fa-regular fa-image"></i>
-                  </button>
-                  <button type="button" id="chatAttachBtn" class="btn icon-btn" title="Attach file">
-                    <i class="fa-solid fa-paperclip"></i>
-                  </button>
-                  <button type="button" id="chatVoiceBtn" class="btn icon-btn" title="Voice note">
-                    <i class="fa-solid fa-microphone"></i>
-                  </button>
-                  <span id="chatVoiceStatus" class="chat-voice-status hidden"></span>
-                </div>
-                <input type="file" id="chatImageInput" accept="image/*" class="hidden-file" hidden>
-                <input type="file" id="chatFileInput" class="hidden-file" hidden>
-              </form>
+              <div id="waitingBanner" class="waiting-banner hidden">
+                <span id="waitingBannerText">0 people want to join</span>
+                <button type="button" id="reviewWaitingBtn" class="btn small-btn">Review</button>
+              </div>
+              <div class="people-section-label" id="inMeetingLabel">In meeting</div>
+              <ul class="participant-list" id="participantList"></ul>
+              <div class="people-section-label hidden" id="raisedHandsLabel">Raised hands</div>
+              <ul class="participant-list raised-list" id="raisedHandsList"></ul>
+              <div class="people-section-label hidden" id="waitingSectionLabel">Waiting</div>
+              <ul class="participant-list waiting-list" id="waitingList"></ul>
             </div>
-            <div id="chatPreviewOverlay" class="chat-preview-overlay hidden" aria-hidden="true">
-              <div class="chat-preview-backdrop" id="chatPreviewBackdrop"></div>
-              <div class="chat-preview-card">
-                <img id="chatPreviewImg" alt="Preview">
-                <div class="chat-preview-actions">
-                  <a id="chatPreviewDownload" class="btn small-btn" download>Download</a>
-                  <button type="button" id="chatPreviewClose" class="btn small-btn">Close</button>
+            <!-- CHAT TAB -->
+            <div class="side-tab-panel hidden" id="chatTab" data-tab="chat" role="tabpanel">
+              <div class="side-chat" id="sideChat" data-drawer-chat="1">
+                <div class="chat-messages" id="chatMessages"></div>
+                <div id="mentionMenu" class="mention-menu hidden" role="listbox"></div>
+                <form class="chat-form" id="chatForm">
+                  <div class="chat-form-row chat-form-row-input">
+                    <input id="chatInput" type="text" maxlength="2000" placeholder=" Message... " autocomplete="off">
+                    <button type="submit" class="btn icon-btn chat-send-btn" title="Send"><i class="fa-solid fa-paper-plane"></i></button>
+                  </div>
+                  <div class="chat-form-row chat-form-row-tools">
+                    <button type="button" id="chatImageBtn" class="btn icon-btn" title="Send image (WebP)">
+                      <i class="fa-regular fa-image"></i>
+                    </button>
+                    <button type="button" id="chatAttachBtn" class="btn icon-btn" title="Attach file">
+                      <i class="fa-solid fa-paperclip"></i>
+                    </button>
+                    <button type="button" id="chatVoiceBtn" class="btn icon-btn" title="Voice note">
+                      <i class="fa-solid fa-microphone"></i>
+                    </button>
+                    <span id="chatVoiceStatus" class="chat-voice-status hidden"></span>
+                  </div>
+                  <input type="file" id="chatImageInput" accept="image/*" class="hidden-file" hidden>
+                  <input type="file" id="chatFileInput" class="hidden-file" hidden>
+                </form>
+              </div>
+              <!-- Pre-send media preview (image / file / voice) -->
+              <div id="mediaPreviewBar" class="media-preview-bar hidden">
+                <div id="mediaPreviewContent" class="media-preview-content"></div>
+                <div class="media-preview-actions">
+                  <button type="button" id="mediaPreviewCancel" class="btn small-btn">Cancel</button>
+                  <button type="button" id="mediaPreviewSend" class="btn small-btn primary-btn">Send</button>
                 </div>
+              </div>
+            </div>
+            <!-- NOTIFICATIONS TAB -->
+            <div class="side-tab-panel hidden" id="notificationsTab" data-tab="notifications" role="tabpanel">
+              <div class="tab-toolbar">
+                <input type="search" id="notifSearch" class="people-search" placeholder="Search notifications…" autocomplete="off">
+              </div>
+              <ul class="notifications-list" id="notificationsList"></ul>
+              <p id="notificationsEmpty" class="history-empty">No notifications yet.</p>
+            </div>
+          </div>
+          <div id="chatPreviewOverlay" class="chat-preview-overlay hidden" aria-hidden="true">
+            <div class="chat-preview-backdrop" id="chatPreviewBackdrop"></div>
+            <div class="chat-preview-card">
+              <img id="chatPreviewImg" alt="Preview">
+              <div class="chat-preview-actions">
+                <a id="chatPreviewDownload" class="btn small-btn" download>Download</a>
+                <button type="button" id="chatPreviewClose" class="btn small-btn">Close</button>
               </div>
             </div>
           </div>
@@ -753,7 +790,7 @@
       <div class="mobile-sheet-body chat-sheet-body" id="chatSheetBody">
         <div class="chat-messages" id="chatSheetMessages"></div>
         <form class="chat-form" id="chatSheetForm">
-          <input id="chatSheetInput" type="text" maxlength="2000" placeholder="Message…" autocomplete="off">
+          <input id="chatSheetInput" type="text" maxlength="2000" placeholder=" Message... " autocomplete="off">
           <button type="submit" class="btn icon-btn" aria-label="Send"><i class="fa-solid fa-paper-plane"></i></button>
         </form>
       </div>

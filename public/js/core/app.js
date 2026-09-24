@@ -596,6 +596,9 @@
         leaveBtn?.classList.add('hidden');
         meetingBadge?.classList.add('hidden');
         copyCodeBtn?.classList.add('hidden');
+        $('meetingNameTop')?.classList.add('hidden');
+        $('shareLinkBtnTop')?.classList.add('hidden');
+        $('endMeetBtnTop')?.classList.add('hidden');
         setWsStatus('ended');
         return;
       }
@@ -1629,7 +1632,12 @@
     }
 
     const sorted = [...listSrc].sort((a, b) => {
-      const rank = (p) => (p.role === 'host' || p.isHost ? 0 : p.role === 'cohost' ? 1 : 2);
+      const rank = (p) => {
+        if (p.role === 'host' || p.isHost) return 0;
+        if (p.role === 'cohost') return 1;
+        if (p.role === 'guest') return 3;
+        return 2; // participant
+      };
       const ra = rank(a), rb = rank(b);
       if (ra !== rb) return ra - rb;
       if (a.id === myId) return -1;
@@ -1678,7 +1686,16 @@
       parent.appendChild(li);
     };
 
-    sorted.forEach((p) => appendItem(p, participantList));
+    const limit = (typeof window.__peopleRenderLimit === 'number') ? window.__peopleRenderLimit : 50;
+    sorted.slice(0, limit).forEach((p) => appendItem(p, participantList));
+    if (sorted.length > limit && participantList) {
+      const more = document.createElement('li');
+      more.className = 'participant-item people-load-more';
+      more.style.justifyContent = 'center';
+      more.style.opacity = '0.7';
+      more.innerHTML = '<span class="p-name">Scroll for more…</span>';
+      participantList.appendChild(more);
+    }
 
     // Raised hands section
     if (raisedListEl && raisedLabel) {
@@ -1922,6 +1939,7 @@
       meetingBadge.classList.toggle('locked', !!(securityState && securityState.locked));
     }
     copyCodeBtn?.classList.remove('hidden');
+    updateMeetingChrome();
 
     renderParticipants();
     renderCards();
@@ -1958,6 +1976,9 @@
     leaveBtn?.classList.add('hidden');
     meetingBadge?.classList.add('hidden');
     copyCodeBtn?.classList.add('hidden');
+    $('meetingNameTop')?.classList.add('hidden');
+    $('shareLinkBtnTop')?.classList.add('hidden');
+    $('endMeetBtnTop')?.classList.add('hidden');
     setWsStatus('left');
   }
 
@@ -3270,24 +3291,38 @@
 
   function updateMeetingChrome() {
     var nameEl = $('meetingNameLabel');
-    if (nameEl && currentMeeting) nameEl.textContent = currentMeeting.name || 'Meeting';
-    var endBtn = $('endMeetBtn');
+    var nameTop = $('meetingNameTop');
+    var name = (currentMeeting && currentMeeting.name) || 'Meeting';
+    if (nameEl) nameEl.textContent = name;
+    if (nameTop) {
+      nameTop.textContent = name;
+      nameTop.classList.toggle('hidden', !currentMeeting);
+    }
     var myId = currentMeeting && currentMeeting.participantId;
     var isHost = !!(currentMeeting && currentMeeting.isHost) || !!(participants.find(function (p) { return p.id === myId; }) || {}).isHost;
+    var endBtn = $('endMeetBtn');
+    var endTop = $('endMeetBtnTop');
     if (endBtn) endBtn.classList.toggle('hidden', !isHost);
+    if (endTop) endTop.classList.toggle('hidden', !isHost || !currentMeeting);
+    var shareTop = $('shareLinkBtnTop');
+    if (shareTop) shareTop.classList.toggle('hidden', !currentMeeting);
   }
 
-  if ($('shareLinkBtn')) $('shareLinkBtn').addEventListener('click', async function () {
+  async function copyInviteLink() {
     if (!currentMeeting || !currentMeeting.code) return;
     var url = location.origin + meetingPath(currentMeeting.code);
     try { await navigator.clipboard.writeText(url); var t = $('liveStatusText'); if (t) t.textContent = 'Link copied'; }
     catch (e) { prompt('Copy invite link:', url); }
-  });
-
-  if ($('endMeetBtn')) $('endMeetBtn').addEventListener('click', function () {
+  }
+  function endMeetingConfirm() {
     if (!confirm('End the meeting for everyone?')) return;
     sendWS({ type: 'end-meeting' });
-  });
+  }
+
+  if ($('shareLinkBtn')) $('shareLinkBtn').addEventListener('click', copyInviteLink);
+  if ($('shareLinkBtnTop')) $('shareLinkBtnTop').addEventListener('click', copyInviteLink);
+  if ($('endMeetBtn')) $('endMeetBtn').addEventListener('click', endMeetingConfirm);
+  if ($('endMeetBtnTop')) $('endMeetBtnTop').addEventListener('click', endMeetingConfirm);
 
   if ($('meetingView')) {
     new MutationObserver(function () {
@@ -4514,5 +4549,364 @@
     wirePhase2Full();
   }
 
+
+
+// ===== UI overhaul: tabs, notifications, media preview, list fixes =====
+  (function wireSideTabsAndNotifs() {
+    const tabs = document.querySelectorAll(".side-tab");
+    const panels = document.querySelectorAll(".side-tab-panel");
+    function switchTab(name) {
+      tabs.forEach((t) => {
+        const on = t.dataset.tab === name;
+        t.classList.toggle("active", on);
+        t.setAttribute("aria-selected", on ? "true" : "false");
+      });
+      panels.forEach((p) => {
+        const on = p.dataset.tab === name;
+        p.classList.toggle("active", on);
+        p.classList.toggle("hidden", !on);
+      });
+      if (name === "notifications") renderNotifications();
+      if (name === "chat") {
+        const box = $("chatMessages");
+        if (box) box.scrollTop = box.scrollHeight;
+        const badge = $("chatUnreadBadge");
+        if (badge) { badge.textContent = "0"; badge.classList.add("hidden"); }
+      }
+    }
+    tabs.forEach((t) => t.addEventListener("click", () => switchTab(t.dataset.tab)));
+
+    let notifications = [];
+    let notifIdSeq = 1;
+    function addNotification(kind, text, meta) {
+      const n = {
+        id: notifIdSeq++,
+        kind: kind || "info",
+        text: text || "",
+        meta: meta || {},
+        attended: false,
+        ts: Date.now(),
+      };
+      notifications.unshift(n);
+      if (notifications.length > 80) notifications.length = 80;
+      const badge = $("notifUnreadBadge");
+      if (badge) {
+        const c = notifications.filter((x) => !x.attended).length;
+        badge.textContent = String(c);
+        badge.classList.toggle("hidden", c === 0);
+      }
+      const active = document.querySelector(".side-tab.active");
+      if (active && active.dataset.tab === "notifications") renderNotifications();
+      return n;
+    }
+    window.__meetAddNotification = addNotification;
+
+    function renderNotifications() {
+      const list = $("notificationsList");
+      const empty = $("notificationsEmpty");
+      if (!list) return;
+      const q = (($("notifSearch") && $("notifSearch").value) || "").trim().toLowerCase();
+      list.innerHTML = "";
+      let shown = 0;
+      notifications.forEach((n) => {
+        if (q && !String(n.text).toLowerCase().includes(q) && !String(n.kind).toLowerCase().includes(q)) return;
+        shown++;
+        const li = document.createElement("li");
+        if (n.attended) li.classList.add("attended");
+        const ago = Math.max(0, Math.round((Date.now() - n.ts) / 1000));
+        const timeStr = ago < 60 ? ago + "s ago" : ago < 3600 ? Math.round(ago / 60) + "m ago" : Math.round(ago / 3600) + "h ago";
+        li.innerHTML = "<div>" + escapeHtml(n.text) + '</div><span class="notif-time">' + timeStr + "</span>";
+        if (!n.attended && (n.kind === "join-request" || n.kind === "raised-hand")) {
+          const acts = document.createElement("div");
+          acts.className = "notif-actions";
+          if (n.kind === "join-request" && n.meta.participantId) {
+            const admit = document.createElement("button");
+            admit.type = "button";
+            admit.className = "btn small-btn primary-btn";
+            admit.textContent = "Admit";
+            admit.addEventListener("click", (e) => {
+              e.stopPropagation();
+              sendWS({ type: "admit", targetId: n.meta.participantId });
+              n.attended = true;
+              renderNotifications();
+            });
+            const deny = document.createElement("button");
+            deny.type = "button";
+            deny.className = "btn small-btn";
+            deny.textContent = "Deny";
+            deny.addEventListener("click", (e) => {
+              e.stopPropagation();
+              sendWS({ type: "deny", targetId: n.meta.participantId });
+              n.attended = true;
+              renderNotifications();
+            });
+            acts.appendChild(admit);
+            acts.appendChild(deny);
+          }
+          if (n.kind === "raised-hand" && n.meta.participantId) {
+            const lower = document.createElement("button");
+            lower.type = "button";
+            lower.className = "btn small-btn";
+            lower.textContent = "Lower hand";
+            lower.addEventListener("click", (e) => {
+              e.stopPropagation();
+              sendWS({ type: "lower-hand", targetId: n.meta.participantId });
+              n.attended = true;
+              renderNotifications();
+            });
+            acts.appendChild(lower);
+          }
+          li.appendChild(acts);
+        }
+        li.addEventListener("click", () => {
+          if (!n.attended) {
+            n.attended = true;
+            renderNotifications();
+            const badge = $("notifUnreadBadge");
+            if (badge) {
+              const c = notifications.filter((x) => !x.attended).length;
+              badge.textContent = String(c);
+              badge.classList.toggle("hidden", c === 0);
+            }
+          }
+        });
+        list.appendChild(li);
+      });
+      if (empty) empty.classList.toggle("hidden", shown > 0);
+    }
+    if ($("notifSearch")) $("notifSearch").addEventListener("input", renderNotifications);
+
+    // Media pre-send preview
+    let pendingMedia = null;
+    function showMediaPreview(attachment, caption) {
+      pendingMedia = { attachment: attachment, caption: caption || "" };
+      const bar = $("mediaPreviewBar");
+      const content = $("mediaPreviewContent");
+      if (!bar || !content) return;
+      content.innerHTML = "";
+      if (attachment.kind === "image" && attachment.dataUrl) {
+        const img = document.createElement("img");
+        img.src = attachment.dataUrl;
+        img.alt = attachment.name || "Image";
+        content.appendChild(img);
+      } else if (attachment.kind === "voice" && attachment.dataUrl) {
+        const audio = document.createElement("audio");
+        audio.controls = true;
+        audio.src = attachment.dataUrl;
+        content.appendChild(audio);
+      } else {
+        const chip = document.createElement("div");
+        chip.className = "file-chip";
+        chip.innerHTML = '<i class="fa-solid fa-paperclip"></i> ' + escapeHtml(attachment.name || "File") +
+          ' <span style="opacity:.7">(' + Math.round((attachment.size || 0) / 1024) + " KB)</span>";
+        content.appendChild(chip);
+      }
+      if (caption) {
+        const cap = document.createElement("div");
+        cap.style.marginTop = "0.35rem";
+        cap.style.opacity = "0.85";
+        cap.textContent = caption;
+        content.appendChild(cap);
+      }
+      bar.classList.remove("hidden");
+    }
+    function clearMediaPreview() {
+      pendingMedia = null;
+      const bar = $("mediaPreviewBar");
+      if (bar) bar.classList.add("hidden");
+      const content = $("mediaPreviewContent");
+      if (content) content.innerHTML = "";
+    }
+    if ($("mediaPreviewCancel")) $("mediaPreviewCancel").addEventListener("click", clearMediaPreview);
+    if ($("mediaPreviewSend")) $("mediaPreviewSend").addEventListener("click", function () {
+      if (!pendingMedia) return;
+      sendChatPayload(pendingMedia.caption || "", pendingMedia.attachment);
+      if ($("chatInput")) $("chatInput").value = "";
+      clearMediaPreview();
+    });
+
+    function rebindFileInput(inputId, kind) {
+      const old = $(inputId);
+      if (!old) return;
+      const neu = old.cloneNode(true);
+      old.parentNode.replaceChild(neu, old);
+      neu.addEventListener("change", async function () {
+        const file = neu.files && neu.files[0];
+        neu.value = "";
+        if (!file) return;
+        try {
+          if (kind === "image") {
+            const compressed = await compressImageToWebp(file, 720, 0.82);
+            if (compressed.dataUrl.length > 900000) {
+              alert("Image still too large after compression. Try a smaller picture.");
+              return;
+            }
+            const caption = ($("chatInput") && $("chatInput").value || "").trim();
+            showMediaPreview({
+              kind: "image",
+              name: compressed.name,
+              mime: compressed.mime,
+              size: compressed.size,
+              dataUrl: compressed.dataUrl,
+            }, caption);
+          } else {
+            if (file.size > 2 * 1024 * 1024) {
+              alert("Attachments are limited to 2 MB over chat. Use a link for larger files.");
+              return;
+            }
+            const dataUrl = await readFileAsDataUrl(file);
+            if (dataUrl.length > 2800000) {
+              alert("File too large to send in chat (max ~2 MB).");
+              return;
+            }
+            const caption = ($("chatInput") && $("chatInput").value || "").trim();
+            showMediaPreview({
+              kind: "file",
+              name: file.name,
+              mime: file.type || "application/octet-stream",
+              size: file.size,
+              dataUrl: dataUrl,
+            }, caption);
+          }
+        } catch (err) {
+          alert(err.message || "Could not process file");
+        }
+      });
+    }
+    rebindFileInput("chatImageInput", "image");
+    rebindFileInput("chatFileInput", "file");
+
+    // Voice preview
+    const voiceBtn = $("chatVoiceBtn");
+    if (voiceBtn) {
+      let voiceRecorder2 = null, voiceChunks2 = [], voiceStream2 = null, voiceRecording2 = false;
+      async function toggleVoiceNotePreview() {
+        if (voiceRecording2) {
+          voiceRecording2 = false;
+          voiceBtn.classList.remove("recording");
+          const st = $("chatVoiceStatus");
+          if (st) { st.classList.add("hidden"); st.classList.remove("recording"); st.textContent = ""; }
+          if (voiceRecorder2 && voiceRecorder2.state !== "inactive") {
+            try { voiceRecorder2.stop(); } catch (_) {}
+          } else if (voiceStream2) {
+            voiceStream2.getTracks().forEach((tr) => tr.stop());
+            voiceStream2 = null;
+          }
+          return;
+        }
+        try {
+          voiceStream2 = await navigator.mediaDevices.getUserMedia({ audio: true });
+          voiceChunks2 = [];
+          const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "";
+          voiceRecorder2 = mime ? new MediaRecorder(voiceStream2, { mimeType: mime }) : new MediaRecorder(voiceStream2);
+          voiceRecorder2.ondataavailable = (e) => { if (e.data && e.data.size) voiceChunks2.push(e.data); };
+          voiceRecorder2.onstop = async () => {
+            try {
+              const blob = new Blob(voiceChunks2, { type: voiceRecorder2.mimeType || "audio/webm" });
+              const dataUrl = await new Promise((res, rej) => {
+                const r = new FileReader();
+                r.onload = () => res(r.result);
+                r.onerror = rej;
+                r.readAsDataURL(blob);
+              });
+              showMediaPreview({
+                kind: "voice",
+                name: "voice-note.webm",
+                mime: blob.type || "audio/webm",
+                size: blob.size,
+                dataUrl: dataUrl,
+              }, "");
+            } catch (e) {
+              alert(e.message || "Could not process voice note");
+            } finally {
+              if (voiceStream2) voiceStream2.getTracks().forEach((tr) => tr.stop());
+              voiceStream2 = null;
+            }
+          };
+          voiceRecorder2.start();
+          voiceRecording2 = true;
+          voiceBtn.classList.add("recording");
+          const st = $("chatVoiceStatus");
+          if (st) {
+            st.textContent = "Recording… tap mic to preview";
+            st.classList.remove("hidden");
+            st.classList.add("recording");
+          }
+        } catch (e) {
+          alert("Microphone permission needed for voice notes.");
+        }
+      }
+      const neuBtn = voiceBtn.cloneNode(true);
+      voiceBtn.parentNode.replaceChild(neuBtn, voiceBtn);
+      neuBtn.id = "chatVoiceBtn";
+      neuBtn.addEventListener("click", toggleVoiceNotePreview);
+    }
+
+    // Fix raised-hands orphan button
+    const raisedObsTarget = document.getElementById("raisedHandsList");
+    if (raisedObsTarget) {
+      const mo = new MutationObserver(function () {
+        const lowerAll = document.getElementById("lowerAllHandsBtn");
+        const label = document.getElementById("raisedHandsLabel");
+        if (lowerAll && label && label.classList.contains("hidden")) lowerAll.remove();
+        if (lowerAll && raisedObsTarget.children.length === 0) lowerAll.remove();
+      });
+      mo.observe(raisedObsTarget, { childList: true });
+      if (raisedObsTarget.parentNode) {
+        mo.observe(raisedObsTarget.parentNode, { childList: true, subtree: true });
+      }
+    }
+
+    // Notifications for raise / waiting (poll lightweight)
+    let prevRaisedIds = new Set();
+    let prevWaitingIds = new Set();
+    setInterval(function () {
+      if (!currentMeeting) return;
+      const raised = (typeof raisedHands !== "undefined" && raisedHands) ? raisedHands : [];
+      const waiting = (typeof waitingList !== "undefined" && waitingList) ? waitingList : [];
+      raised.forEach((h) => {
+        if (!prevRaisedIds.has(h.id)) {
+          addNotification("raised-hand", (h.name || "Someone") + " raised their hand", { participantId: h.id });
+        }
+      });
+      prevRaisedIds = new Set(raised.map((h) => h.id));
+      waiting.forEach((w) => {
+        if (!prevWaitingIds.has(w.id)) {
+          addNotification("join-request", (w.name || "Someone") + " wants to join", { participantId: w.id });
+        }
+      });
+      prevWaitingIds = new Set(waiting.map((w) => w.id));
+      notifications.forEach((n) => {
+        if (n.kind === "raised-hand" && n.meta.participantId && !prevRaisedIds.has(n.meta.participantId)) {
+          n.attended = true;
+        }
+        if (n.kind === "join-request" && n.meta.participantId && !prevWaitingIds.has(n.meta.participantId)) {
+          n.attended = true;
+        }
+      });
+      const badge = $("notifUnreadBadge");
+      if (badge) {
+        const c = notifications.filter((x) => !x.attended).length;
+        badge.textContent = String(c);
+        badge.classList.toggle("hidden", c === 0);
+      }
+    }, 1500);
+
+    // Improve participant sort: host, cohost, participant, guest
+    // Patch rank inside renderParticipants by redefining sort if we can intercept
+    // Also client-side progressive render for many users
+    window.__peopleRenderLimit = window.__peopleRenderLimit || 50;
+    const peopleListEl = $("participantList");
+    if (peopleListEl) {
+      peopleListEl.addEventListener("scroll", function () {
+        if (peopleListEl.scrollTop + peopleListEl.clientHeight >= peopleListEl.scrollHeight - 48) {
+          if (typeof participants !== "undefined" && window.__peopleRenderLimit < participants.length) {
+            window.__peopleRenderLimit += 40;
+            if (typeof renderParticipants === "function") renderParticipants();
+          }
+        }
+      });
+    }
+  })();
 
 })();
