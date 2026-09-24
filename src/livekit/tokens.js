@@ -1,16 +1,26 @@
 const { AccessToken } = require('livekit-server-sdk');
 const config = require('../config');
 
+// TrackSource enum (livekit-server-sdk v2). Prefer numeric/enum values —
+// passing plain strings like "microphone" throws:
+//   "Cannot convert TrackSource microphone to string"
+let TrackSource = null;
+try {
+  TrackSource = require('livekit-server-sdk').TrackSource;
+} catch (_) {
+  TrackSource = null;
+}
+
 /**
  * Create a LiveKit access token with grants derived from Meet permissions.
  * @param {string} identity
  * @param {string} name
  * @param {string} roomName
  * @param {object} [opts]
- * @param {boolean} [opts.canPublish] - mic/cam/screen
+ * @param {boolean} [opts.canPublish]
  * @param {boolean} [opts.canSubscribe]
- * @param {boolean} [opts.canPublishData] - chat / data channel
- * @param {string[]} [opts.canPublishSources] - optional source list when SDK supports it
+ * @param {boolean} [opts.canPublishData]
+ * @param {Array<number|string>} [opts.canPublishSources] - TrackSource enums only
  */
 async function createLiveKitToken(identity, name, roomName, opts = {}) {
   if (!config.LIVEKIT_API_KEY || !config.LIVEKIT_API_SECRET) {
@@ -36,9 +46,15 @@ async function createLiveKitToken(identity, name, roomName, opts = {}) {
     canPublishData,
   };
 
-  // Newer livekit-server-sdk supports canPublishSources; ignore if unsupported at runtime
+  // Only attach canPublishSources when we have real TrackSource enum values.
+  // Never pass raw strings — the JWT encoder cannot serialize them.
   if (Array.isArray(opts.canPublishSources) && opts.canPublishSources.length) {
-    grant.canPublishSources = opts.canPublishSources;
+    const safe = opts.canPublishSources.filter(
+      (s) => typeof s === 'number' || (s && typeof s === 'object')
+    );
+    if (safe.length) {
+      grant.canPublishSources = safe;
+    }
   }
 
   at.addGrant(grant);
@@ -52,14 +68,27 @@ function grantsFromPermissions(perms = {}) {
   const canPublish =
     !!perms.microphone || !!perms.camera || !!perms.screenShare;
   const canPublishData = !!perms.chat || !!perms.reactions;
+
   const sources = [];
-  if (perms.microphone) sources.push('microphone');
-  if (perms.camera) sources.push('camera');
-  if (perms.screenShare) sources.push('screen_share');
+  if (TrackSource) {
+    // livekit-server-sdk exports TrackSource as an object of numeric enums
+    if (perms.microphone && TrackSource.MICROPHONE != null) {
+      sources.push(TrackSource.MICROPHONE);
+    }
+    if (perms.camera && TrackSource.CAMERA != null) {
+      sources.push(TrackSource.CAMERA);
+    }
+    if (perms.screenShare) {
+      if (TrackSource.SCREEN_SHARE != null) sources.push(TrackSource.SCREEN_SHARE);
+      if (TrackSource.SCREEN_SHARE_AUDIO != null) sources.push(TrackSource.SCREEN_SHARE_AUDIO);
+    }
+  }
+
   return {
     canPublish,
     canSubscribe: true,
     canPublishData,
+    // Only include when we have valid enum values; otherwise omit (canPublish covers it)
     canPublishSources: sources.length ? sources : undefined,
   };
 }
