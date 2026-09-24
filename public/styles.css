@@ -2784,3 +2784,45 @@ html.dark .mention-menu,
   background: var(--p1-primary-soft, #EEECFF) !important;
   color: var(--p1-primary, #625BFF) !important;
 }
+
+
+/* A-D wrap: participant menu must always be visible above panels */
+#participantMenu.context-menu {
+  position: fixed !important;
+  z-index: 3000 !important;
+  min-width: 220px;
+  max-width: min(320px, calc(100vw - 16px));
+  max-height: min(70vh, 480px);
+  overflow-y: auto;
+  background: #fff !important;
+  border: 1px solid #e8eaf2;
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(23, 26, 43, 0.18);
+  padding: 0.4rem;
+}
+#participantMenu.context-menu.hidden {
+  display: none !important;
+}
+.participant-item {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  position: relative;
+}
+.participant-item .p-name {
+  flex: 1;
+  min-width: 0;
+}
+.participant-more {
+  flex-shrink: 0;
+  opacity: 0.85;
+  min-width: 32px;
+  min-height: 32px;
+  z-index: 2;
+  cursor: pointer;
+}
+.participant-item:hover .participant-more,
+.participant-more:focus {
+  opacity: 1;
+  background: var(--p1-soft, #F2F3FA);
+}

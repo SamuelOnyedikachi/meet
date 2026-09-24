@@ -605,7 +605,14 @@
           const me = participants.find((p) => p.id === currentMeeting.participantId);
           if (me) {
             myRole = me.role || myRole;
-            if (me.permissions) myPermissions = me.permissions;
+            if (me.isHost || me.role === 'host') {
+              myRole = 'host';
+              currentMeeting.isHost = true;
+              currentMeeting.role = 'host';
+            }
+            ensureModPermissions(me.permissions || null);
+          } else {
+            ensureModPermissions();
           }
         }
         try { syncSharingFlagsFromLiveKit(); } catch (_) {
@@ -672,7 +679,13 @@
             const me = participants.find((p) => p.id === currentMeeting.participantId);
             if (me) {
               myRole = me.role || myRole;
-              if (me.permissions) myPermissions = me.permissions;
+              if (me.isHost || me.role === 'host') {
+                myRole = 'host';
+                currentMeeting.isHost = true;
+              }
+              ensureModPermissions(me.permissions || null);
+            } else {
+              ensureModPermissions();
             }
           }
           renderParticipants();
@@ -1538,6 +1551,45 @@
   let handRaised = false;
   let removeTargetId = null;
 
+  const HOST_PERMISSIONS = {
+    microphone: true, camera: true, screenShare: true, chat: true, reactions: true, raiseHand: true,
+    invite: true, muteOthers: true, removePeople: true, manageWaiting: true, manageRoles: true,
+    manageSecurity: true, lockMeeting: true, endMeeting: true, transferHost: true, lowerHands: true, askUnmute: true,
+  };
+
+  function isHostLike() {
+    if (myRole === 'host' || myRole === 'cohost') return true;
+    if (currentMeeting && (currentMeeting.isHost || currentMeeting.role === 'host' || currentMeeting.role === 'cohost')) return true;
+    return false;
+  }
+
+  /** Keep moderation flags alive for host/co-host even if roster omits them */
+  function ensureModPermissions(fromRoster) {
+    if (fromRoster && typeof fromRoster === 'object') {
+      myPermissions = Object.assign({}, myPermissions || {}, fromRoster);
+    }
+    if (myRole === 'host' || (currentMeeting && currentMeeting.isHost && myRole !== 'cohost' && myRole !== 'participant' && myRole !== 'guest')) {
+      myRole = myRole === 'cohost' ? 'cohost' : 'host';
+      myPermissions = Object.assign({}, HOST_PERMISSIONS, myPermissions || {});
+    } else if (myRole === 'cohost') {
+      myPermissions = Object.assign({
+        muteOthers: true, removePeople: true, manageWaiting: true, lowerHands: true, askUnmute: true,
+        screenShare: true, chat: true, raiseHand: true, microphone: true,
+      }, myPermissions || {});
+    }
+    return myPermissions;
+  }
+
+  function canModerateNow() {
+    ensureModPermissions();
+    return !!(
+      myPermissions.muteOthers || myPermissions.removePeople || myPermissions.manageWaiting ||
+      myPermissions.manageRoles || myPermissions.manageSecurity || myPermissions.lowerHands ||
+      myRole === 'host' || myRole === 'cohost' || (currentMeeting && currentMeeting.isHost)
+    );
+  }
+
+
 
   function renderParticipants() {
     if (!participantList) return;
@@ -1554,7 +1606,7 @@
     if (participantCount) participantCount.textContent = String(participants.length);
 
     const myId = currentMeeting?.participantId;
-    const canModerate = !!(myPermissions.muteOthers || myPermissions.removePeople || myPermissions.manageWaiting || myPermissions.manageRoles);
+    const canModerate = canModerateNow();
 
     const searchEl = document.getElementById('peopleSearch');
     const q = (searchEl && searchEl.value ? searchEl.value : '').trim().toLowerCase();
@@ -1597,16 +1649,20 @@
         ${p.sharing ? '<span class="live-dot" title="Sharing screen" aria-label="Sharing"></span>' : ''}
       `;
 
-      if (p.id !== myId && (canModerate || opts.waiting)) {
+      if (p.id !== myId && (canModerate || opts.waiting || isHostLike())) {
         const more = document.createElement('button');
         more.type = 'button';
         more.className = 'btn icon-btn participant-more';
         more.title = 'Actions';
+        more.setAttribute('aria-label', 'Participant actions');
         more.innerHTML = '<i class="fa-solid fa-ellipsis"></i>';
-        more.addEventListener('click', (e) => {
+        const openMenu = (e) => {
+          e.preventDefault();
           e.stopPropagation();
-          openParticipantMenu(p, e.clientX, e.clientY, opts);
-        });
+          openParticipantMenu(p, e.clientX || (e.touches && e.touches[0]?.clientX) || 40, e.clientY || (e.touches && e.touches[0]?.clientY) || 40, opts);
+        };
+        more.addEventListener('click', openMenu);
+        more.addEventListener('pointerdown', (e) => { e.stopPropagation(); });
         li.appendChild(more);
       }
       parent.appendChild(li);
@@ -1815,16 +1871,14 @@
       isHost: !!isHost || data.role === 'host',
       role: data.role || (isHost ? 'host' : 'participant'),
     };
-    myRole = currentMeeting.role;
+    myRole = currentMeeting.role || (isHost ? 'host' : 'participant');
     myPermissions = data.permissions || {};
-    // Host must always have full moderation surface even if API omits permissions
-    if ((isHost || data.role === 'host' || currentMeeting.isHost) && (!myPermissions || !myPermissions.manageSecurity)) {
-      myPermissions = Object.assign({
-        microphone: true, camera: true, screenShare: true, chat: true, reactions: true, raiseHand: true,
-        invite: true, muteOthers: true, removePeople: true, manageWaiting: true, manageRoles: true,
-        manageSecurity: true, lockMeeting: true, endMeeting: true, transferHost: true, lowerHands: true, askUnmute: true,
-      }, myPermissions || {});
+    if (isHost || data.role === 'host' || currentMeeting.isHost) {
+      myRole = 'host';
+      currentMeeting.isHost = true;
+      currentMeeting.role = 'host';
     }
+    ensureModPermissions(data.permissions);
     participants = data.participants || [];
     waitingList = data.waiting || [];
     raisedHands = data.raisedHands || [];
@@ -3401,33 +3455,44 @@
 
   function openParticipantMenu(p, x, y, opts) {
     const menu = document.getElementById('participantMenu');
-    if (!menu) return;
+    if (!menu) {
+      console.warn('[meet] #participantMenu missing from DOM');
+      return;
+    }
+    ensureModPermissions();
     const role = p.role || (p.isHost ? 'host' : 'participant');
+    const hostLike = myRole === 'host' || myRole === 'cohost' || !!(currentMeeting && currentMeeting.isHost);
+
     let html = `<div class="menu-head">${escapeHtml(p.name)}</div><div class="menu-sub">${escapeHtml(p.roleLabel || role)}</div><div class="menu-sep"></div>`;
 
     if (opts && opts.waiting) {
       html += `<button type="button" data-act="admit"><i class="fa-solid fa-check"></i> Admit</button>`;
       html += `<button type="button" data-act="decline" class="danger"><i class="fa-solid fa-xmark"></i> Decline</button>`;
     } else {
-      if (myPermissions.muteOthers) {
+      const canMute = !!(myPermissions.muteOthers || hostLike);
+      const canLower = !!(myPermissions.lowerHands || hostLike);
+      const canRole = !!(myPermissions.manageRoles || myRole === 'host');
+      const canRemove = !!(myPermissions.removePeople || hostLike);
+
+      if (canMute) {
         html += `<button type="button" data-act="mute"><i class="fa-solid fa-microphone-slash"></i> Mute</button>`;
         html += `<button type="button" data-act="ask-unmute"><i class="fa-solid fa-microphone"></i> Ask to unmute</button>`;
       }
-      if (myPermissions.lowerHands && p.handRaised) {
+      if (canLower && p.handRaised) {
         html += `<button type="button" data-act="lower-hand"><i class="fa-solid fa-hand"></i> Lower hand</button>`;
       }
-      if (p.sharing && (myPermissions.muteOthers || myRole === 'host' || myRole === 'cohost')) {
+      if (p.sharing && canMute) {
         html += `<button type="button" data-act="stop-share"><i class="fa-solid fa-desktop"></i> Stop sharing</button>`;
       }
       html += `<div class="menu-sep"></div>`;
-      if (myPermissions.manageRoles && role !== 'host') {
+      if (canRole && role !== 'host') {
         if (role !== 'cohost') {
           html += `<button type="button" data-act="make-cohost"><i class="fa-solid fa-user-shield"></i> Make co-host</button>`;
         } else {
           html += `<button type="button" data-act="remove-cohost"><i class="fa-solid fa-user"></i> Remove co-host</button>`;
         }
         const pp = p.permissions || {};
-        html += `<div class="menu-sep"></div><div class="menu-sub">Permissions</div>`;
+        html += `<div class="menu-sub">Permissions</div>`;
         html += `<label class="perm-row"><span>Microphone</span><input type="checkbox" data-perm="microphone" ${pp.microphone !== false ? 'checked' : ''}></label>`;
         html += `<label class="perm-row"><span>Screen share</span><input type="checkbox" data-perm="screenShare" ${pp.screenShare !== false ? 'checked' : ''}></label>`;
         html += `<label class="perm-row"><span>Chat</span><input type="checkbox" data-perm="chat" ${pp.chat !== false ? 'checked' : ''}></label>`;
@@ -3435,23 +3500,35 @@
       if (myRole === 'host' && role !== 'host') {
         html += `<button type="button" data-act="transfer-host"><i class="fa-solid fa-crown"></i> Transfer host</button>`;
       }
-      if (myPermissions.removePeople && role !== 'host') {
+      if (canRemove && role !== 'host') {
         html += `<button type="button" data-act="remove" class="danger"><i class="fa-solid fa-user-minus"></i> Remove from meeting</button>`;
       }
+      if (!canMute && !canRole && !canRemove) {
+        html += `<div class="menu-sub">No actions available</div>`;
+      }
     }
+
     menu.innerHTML = html;
     menu.classList.remove('hidden');
+    menu.style.display = 'block';
+    menu.style.zIndex = '3000';
+    menu.style.position = 'fixed';
+
     const pad = 8;
-    const mw = menu.offsetWidth || 200;
-    const mh = menu.offsetHeight || 200;
-    menu.style.left = Math.min(x, window.innerWidth - mw - pad) + 'px';
-    menu.style.top = Math.min(y, window.innerHeight - mh - pad) + 'px';
+    // measure after visible
+    const mw = Math.max(menu.offsetWidth || 220, 200);
+    const mh = Math.max(menu.offsetHeight || 120, 80);
+    let left = typeof x === 'number' ? x : 40;
+    let top = typeof y === 'number' ? y : 40;
+    left = Math.min(Math.max(pad, left), window.innerWidth - mw - pad);
+    top = Math.min(Math.max(pad, top), window.innerHeight - mh - pad);
+    menu.style.left = left + 'px';
+    menu.style.top = top + 'px';
 
     menu.onclick = (e) => {
       const permInput = e.target.closest('input[data-perm]');
       if (permInput) {
         e.stopPropagation();
-        const key = permInput.getAttribute('data-perm');
         const permissions = {};
         menu.querySelectorAll('input[data-perm]').forEach((inp) => {
           permissions[inp.getAttribute('data-perm')] = !!inp.checked;
@@ -3461,6 +3538,8 @@
       }
       const btn = e.target.closest('button[data-act]');
       if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
       const act = btn.getAttribute('data-act');
       if (act === 'mute') sendWS({ type: 'mute-participant', targetId: p.id });
       if (act === 'ask-unmute') sendWS({ type: 'ask-unmute', targetId: p.id });
@@ -3477,7 +3556,22 @@
       if (act === 'decline') sendWS({ type: 'decline-participant', targetId: p.id });
       if (act === 'remove') openRemoveModal(p);
       menu.classList.add('hidden');
+      menu.style.display = '';
     };
+
+    // Close on outside click — next tick so this open click does not close it
+    window.__meetMenuCloser && document.removeEventListener('click', window.__meetMenuCloser);
+    window.__meetMenuCloser = function (ev) {
+      if (!menu.contains(ev.target) && !ev.target.closest('.participant-more')) {
+        menu.classList.add('hidden');
+        menu.style.display = '';
+        document.removeEventListener('click', window.__meetMenuCloser);
+        window.__meetMenuCloser = null;
+      }
+    };
+    setTimeout(function () {
+      document.addEventListener('click', window.__meetMenuCloser);
+    }, 0);
   }
 
   function openRemoveModal(p) {
@@ -3596,12 +3690,8 @@
     if (removeCancel) removeCancel.addEventListener('click', closeRemove);
     if (removeBackdrop) removeBackdrop.addEventListener('click', closeRemove);
 
-    document.addEventListener('click', (e) => {
-      const menu = document.getElementById('participantMenu');
-      if (menu && !menu.classList.contains('hidden') && !menu.contains(e.target)) {
-        menu.classList.add('hidden');
-      }
-    });
+    // menu outside-click handled in openParticipantMenu
+
 
     const reviewBtn = document.getElementById('reviewWaitingBtn');
     if (reviewBtn) {
