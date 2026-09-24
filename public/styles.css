@@ -222,9 +222,43 @@ html.dark body, body.dark {
 }
 .btn.leave-btn {
   color: var(--danger);
+}
+.btn.leave-btn .leave-label,
+.share-top .share-label,
+.end-top .end-label {
+  display: none !important;
+}
+/* Topbar action icons — hover labels via title attribute */
+.topbar .controls .btn.icon-btn,
+.topbar .controls .btn.leave-btn,
+.topbar .controls .share-top,
+.topbar .controls .end-top {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 8px;
+}
+.topbar .user-area {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.topbar .user-label {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85rem;
+}
+.btn.leave-btn {
   border-color: rgba(220, 38, 38, 0.25);
 }
 .btn.leave-btn:hover { background: rgba(220, 38, 38, 0.08); }
+.btn.end-top.danger-btn {
+  color: var(--danger, #dc2626);
+  border-color: rgba(220, 38, 38, 0.25);
+}
+.btn.end-top.danger-btn:hover { background: rgba(220, 38, 38, 0.08); }
 .btn.full-width { width: 100%; }
 .btn.sharing-active, .btn.call-btn.sharing-active {
   background: var(--success-soft);
@@ -1045,7 +1079,6 @@ body.dark .history-card {
   .desktop-only { display: none !important; }
   .auth-area .btn { display: none; } /* Log in / Sign up live in more menu on mobile */
   .user-label { display: none; }
-  .leave-btn .leave-label { display: none; }
   .leave-btn {
     width: 36px;
     height: 36px;
@@ -4055,18 +4088,20 @@ body.dark #meetingView .people-search {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.35rem;
-  padding: 0.55rem 0.4rem;
+  gap: 0.25rem;
+  padding: 0.55rem 0.35rem;
   border: none;
   background: transparent;
   color: var(--muted, #8b8f9a);
-  font-size: 0.78rem;
+  font-size: 0.95rem;
   font-weight: 600;
   border-radius: 10px 10px 0 0;
   cursor: pointer;
   position: relative;
   transition: color .15s, background .15s;
 }
+/* Icons only — labels via native title tooltip on hover */
+.side-tab .tab-label { display: none !important; }
 .side-tab:hover { color: var(--text); background: rgba(0,0,0,.03); }
 .side-tab.active {
   color: var(--accent, #6366f1);
@@ -4075,18 +4110,21 @@ body.dark #meetingView .people-search {
 .side-tab.active::after {
   content: '';
   position: absolute;
-  left: 12%;
-  right: 12%;
+  left: 18%;
+  right: 18%;
   bottom: 0;
   height: 2px;
   background: var(--accent, #6366f1);
   border-radius: 2px 2px 0 0;
 }
 .side-tab .count-badge {
-  font-size: 0.65rem;
-  min-width: 1.15rem;
-  height: 1.15rem;
-  padding: 0 0.3rem;
+  font-size: 0.62rem;
+  min-width: 1.05rem;
+  height: 1.05rem;
+  padding: 0 0.28rem;
+  position: absolute;
+  top: 4px;
+  right: 10%;
 }
 .side-tab-panels {
   flex: 1;
@@ -4214,7 +4252,6 @@ html.dark .notifications-list li,
 body.dark .notifications-list li { background: rgba(255,255,255,.04); }
 
 @media (max-width: 768px) {
-  .side-tab .tab-label { display: none; }
   .side-tab { padding: 0.6rem 0.3rem; }
 }
 

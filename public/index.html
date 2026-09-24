@@ -24,31 +24,36 @@
         <span id="meetingNameTop" class="meeting-name-top hidden"></span>
       </div>
       <div class="controls">
-        <button id="shareLinkBtnTop" class="btn small-btn share-top hidden" title="Copy invite link">
-          <i class="fa-solid fa-link"></i> <span class="share-label">Share</span>
-        </button>
-        <button id="endMeetBtnTop" class="btn small-btn danger-btn end-top hidden" title="End meeting for everyone">
-          <i class="fa-solid fa-phone-slash"></i> <span class="end-label">End</span>
-        </button>
         <div id="authArea" class="auth-area">
-          <button id="loginOpenBtn" class="btn small-btn">Log in</button>
-          <button id="signupOpenBtn" class="btn small-btn primary-outline">Sign up</button>
+          <button id="loginOpenBtn" class="btn icon-btn" title="Log in" aria-label="Log in">
+            <i class="fa-solid fa-right-to-bracket"></i>
+          </button>
+          <button id="signupOpenBtn" class="btn icon-btn" title="Sign up" aria-label="Sign up">
+            <i class="fa-solid fa-user-plus"></i>
+          </button>
         </div>
         <div id="userArea" class="user-area hidden">
           <span id="userLabel" class="user-label"></span>
-          <button id="historyBtn" class="btn icon-btn desktop-only" title="Meeting history">
+          <button id="historyBtn" class="btn icon-btn desktop-only" title="Meeting history" aria-label="Meeting history">
             <i class="fa-solid fa-clock-rotate-left"></i>
           </button>
-          <button id="logoutBtn" class="btn small-btn desktop-only" title="Log out">Log out</button>
+          <button id="logoutBtn" class="btn icon-btn desktop-only" title="Log out" aria-label="Log out">
+            <i class="fa-solid fa-arrow-right-from-bracket"></i>
+          </button>
         </div>
-        <button id="leaveBtn" class="btn leave-btn hidden" title="Leave meeting">
-          <i class="fa-solid fa-right-from-bracket"></i>
-          <span class="leave-label">Leave</span>
+        <button id="shareLinkBtnTop" class="btn icon-btn share-top hidden" title="Share invite link" aria-label="Share invite link">
+          <i class="fa-solid fa-link"></i>
         </button>
-        <button id="themeToggle" class="btn icon-btn desktop-only" title="Toggle day / night">
+        <button id="endMeetBtnTop" class="btn icon-btn danger-btn end-top hidden" title="End call for everyone" aria-label="End call for everyone">
+          <i class="fa-solid fa-phone-slash"></i>
+        </button>
+        <button id="leaveBtn" class="btn icon-btn leave-btn hidden" title="Leave call" aria-label="Leave call">
+          <i class="fa-solid fa-right-from-bracket"></i>
+        </button>
+        <button id="themeToggle" class="btn icon-btn desktop-only" title="Toggle day / night" aria-label="Toggle theme">
           <i class="fa-solid fa-moon"></i>
         </button>
-        <button id="fullscreenBtn" class="btn icon-btn desktop-only" title="Toggle app fullscreen">
+        <button id="fullscreenBtn" class="btn icon-btn desktop-only" title="Toggle app fullscreen" aria-label="Fullscreen">
           <i class="fa-solid fa-up-right-and-down-left-from-center"></i>
         </button>
         <div class="more-menu-wrap mobile-only">
