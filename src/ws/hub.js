@@ -19,6 +19,7 @@ const {
 } = require('../rooms/store');
 const { endMeeting } = require('../rooms/lifecycle');
 const { can } = require('../lib/permissions');
+const { verifyWsCredential } = require('../lib/wsCredential');
 const { registerBuiltinPlugins, loadAll } = require('../plugins');
 
 function createPluginContext() {
@@ -82,40 +83,73 @@ function attachWebSocket(server) {
       }
 
       if (msg.type === 'register') {
-        participantId = msg.participantId;
-        meetingCode = (msg.code || '').toUpperCase();
+        const claimedId = msg.participantId;
+        const claimedCode = (msg.code || '').toUpperCase();
+        const credential = msg.wsCredential || msg.credential || msg.token;
 
-        const old = clients.get(participantId);
-        if (old && old !== ws) {
+        const verified = verifyWsCredential(credential, {
+          participantId: claimedId,
+          code: claimedCode,
+        });
+
+        if (!verified.ok) {
           try {
-            old.close();
+            ws.send(JSON.stringify({
+              type: 'error',
+              error: 'Unauthorized WebSocket registration',
+              detail: verified.error,
+            }));
+            ws.close(4401, 'unauthorized');
           } catch (_) {}
+          return;
         }
-        setClient(participantId, ws);
+
+        participantId = verified.participantId;
+        meetingCode = verified.code;
 
         const meeting = getMeeting(meetingCode);
-        if (meeting) {
-          meeting.lastActivity = Date.now();
-          if (!Array.isArray(meeting.chatHistory)) meeting.chatHistory = [];
+        if (!meeting) {
           try {
-            const p = meeting.participants.get(participantId);
-            ws.send(
-              JSON.stringify({
-                type: 'participants',
-                participants: getParticipantsList(meeting),
-                waiting: getWaitingList(meeting),
-                raisedHands: getRaisedHands(meeting),
-                security: getSecurityState(meeting),
-                self: p ? { id: p.id, role: p.role, status: p.status } : null,
-              })
-            );
+            ws.send(JSON.stringify({ type: 'error', error: 'Meeting not found' }));
+            ws.close(4404, 'meeting not found');
           } catch (_) {}
-          for (const hook of ctx._registerHooks) {
-            try {
-              hook(ws, meeting, participantId);
-            } catch (e) {
-              console.error('[ws] onRegister hook', e.message);
-            }
+          return;
+        }
+
+        const p = meeting.participants.get(participantId);
+        if (!p || p.status === 'REMOVED' || p.status === 'BLOCKED') {
+          try {
+            ws.send(JSON.stringify({ type: 'error', error: 'Not a participant of this meeting' }));
+            ws.close(4403, 'forbidden');
+          } catch (_) {}
+          return;
+        }
+
+        const oldSock = clients.get(participantId);
+        if (oldSock && oldSock !== ws) {
+          try { oldSock.close(); } catch (_) {}
+        }
+        setClient(participantId, ws);
+        meeting.lastActivity = Date.now();
+        if (!Array.isArray(meeting.chatHistory)) meeting.chatHistory = [];
+
+        try {
+          ws.send(
+            JSON.stringify({
+              type: 'participants',
+              participants: getParticipantsList(meeting),
+              waiting: getWaitingList(meeting),
+              raisedHands: getRaisedHands(meeting),
+              security: getSecurityState(meeting),
+              self: { id: p.id, role: p.role, status: p.status },
+            })
+          );
+        } catch (_) {}
+        for (const hook of ctx._registerHooks) {
+          try {
+            hook(ws, meeting, participantId);
+          } catch (e) {
+            console.error('[ws] onRegister hook', e.message);
           }
         }
         return;

@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link rel="stylesheet" href="styles.css?v=20260924wrapAD2">
+  <link rel="stylesheet" href="styles.css?v=20260924secMob1">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤝</text></svg>">
 </head>
 <body>
@@ -450,51 +450,89 @@
                 </form>
               </div>
             </div>
-            <div class="call-controls">
-              <button id="shareBtn" class="btn call-btn" title="Share your screen">
-                <i class="fa-solid fa-desktop"></i>
-                <span>Share screen</span>
-              </button>
-              <label class="quality-control send-quality" title="Your outgoing screen quality">
-                <span class="quality-label">Send</span>
-                <select id="sendQualitySelect" aria-label="Send screen quality">
-                  <option value="high" selected>High</option>
-                  <option value="medium">Medium</option>
-                  <option value="low">Low</option>
-                </select>
-              </label>
-              <label class="quality-control view-quality" title="How you view others' screens (audio stays on)">
-                <span class="quality-label">View</span>
-                <select id="viewQualitySelect" aria-label="View screen quality">
-                  <option value="high" selected>High</option>
-                  <option value="medium">Medium</option>
-                  <option value="off">Audio only</option>
-                </select>
-              </label>
-              <button id="micBtn" class="btn call-btn" title="Toggle microphone (M)">
+            <div class="call-controls toolbar-pill" role="toolbar" aria-label="Meeting controls">
+              <button id="micBtn" class="btn call-btn" title="Microphone (M)" aria-label="Toggle microphone">
                 <i class="fa-solid fa-microphone"></i>
                 <span>Mic</span>
               </button>
-              <button id="cameraBtn" class="btn call-btn" title="Toggle camera (V)" aria-pressed="false">
+              <button id="cameraBtn" class="btn call-btn" title="Camera (V)" aria-label="Toggle camera" aria-pressed="false">
                 <i class="fa-solid fa-video"></i>
                 <span>Cam</span>
               </button>
-              <button id="raiseHandBtn" class="btn call-btn" title="Raise hand (H)" aria-pressed="false">
+              <button id="shareBtn" class="btn call-btn" title="Share screen" aria-label="Share screen">
+                <i class="fa-solid fa-desktop"></i>
+                <span>Share</span>
+              </button>
+              <button id="raiseHandBtn" class="btn call-btn" title="Raise hand (H)" aria-label="Raise hand" aria-pressed="false">
                 <i class="fa-solid fa-hand"></i>
                 <span>Hand</span>
               </button>
-              <button id="securityBtn" class="btn call-btn hidden" title="Meeting security">
+              <button id="toolbarChatBtn" class="btn call-btn" title="Chat (C)" aria-label="Open chat">
+                <i class="fa-solid fa-comment"></i>
+                <span>Chat</span>
+              </button>
+              <button id="toolbarPeopleBtn" class="btn call-btn" title="People" aria-label="Open people">
+                <i class="fa-solid fa-users"></i>
+                <span>People</span>
+              </button>
+              <button id="securityBtn" class="btn call-btn hidden" title="Meeting security" aria-label="Meeting security">
                 <i class="fa-solid fa-shield-halved"></i>
                 <span>Security</span>
               </button>
-              <div class="emoji-bar" id="emojiBar">
-                <button type="button" class="emoji-btn" data-emoji="👍" title="Thumbs up">👍</button>
-                <button type="button" class="emoji-btn" data-emoji="👏" title="Clap">👏</button>
-                <button type="button" class="emoji-btn" data-emoji="❤️" title="Heart">❤️</button>
-                <button type="button" class="emoji-btn" data-emoji="😂" title="Laugh">😂</button>
-                <button type="button" class="emoji-btn" data-emoji="🎉" title="Celebrate">🎉</button>
+              <div class="meeting-more-wrap">
+                <button id="meetingMoreBtn" class="btn call-btn" title="More" aria-label="More controls" aria-haspopup="true" aria-expanded="false">
+                  <i class="fa-solid fa-ellipsis"></i>
+                  <span>More</span>
+                </button>
+                <div id="meetingMorePanel" class="meeting-more-panel hidden" role="menu">
+                  <div class="more-section-label">Reactions</div>
+                  <div class="reaction-row" id="emojiBar">
+                    <button type="button" class="emoji-btn" data-emoji="👍" title="Thumbs up">👍</button>
+                    <button type="button" class="emoji-btn" data-emoji="👏" title="Clap">👏</button>
+                    <button type="button" class="emoji-btn" data-emoji="❤️" title="Heart">❤️</button>
+                    <button type="button" class="emoji-btn" data-emoji="😂" title="Laugh">😂</button>
+                    <button type="button" class="emoji-btn" data-emoji="🎉" title="Celebrate">🎉</button>
+                  </div>
+                  <div class="more-sep"></div>
+                  <div class="more-section-label">Media quality</div>
+                  <div class="quality-block">
+                    <label title="Your outgoing screen quality">
+                      <span>Your screen</span>
+                      <select id="sendQualitySelect" aria-label="Send screen quality">
+                        <option value="high" selected>High</option>
+                        <option value="medium">Medium</option>
+                        <option value="low">Low</option>
+                      </select>
+                    </label>
+                    <label title="How you view others' screens">
+                      <span>Incoming</span>
+                      <select id="viewQualitySelect" aria-label="View screen quality">
+                        <option value="high" selected>High</option>
+                        <option value="medium">Medium</option>
+                        <option value="off">Audio only</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div class="more-sep"></div>
+                  <button type="button" class="more-item" id="moreConnectionBtn" data-act="connection">
+                    <i class="fa-solid fa-signal"></i> Connection
+                  </button>
+                  <button type="button" class="more-item" id="moreActivityBtn" data-act="activity">
+                    <i class="fa-solid fa-list"></i> Meeting activity
+                  </button>
+                  <button type="button" class="more-item" id="moreRecordBtn" data-act="record">
+                    <i class="fa-solid fa-circle"></i> Record meeting
+                  </button>
+                  <button type="button" class="more-item" id="moreInviteBtn" data-act="invite">
+                    <i class="fa-solid fa-user-plus"></i> Invite people
+                  </button>
+                  <button type="button" class="more-item" id="moreFullscreenBtn" data-act="fullscreen">
+                    <i class="fa-solid fa-expand"></i> Fullscreen
+                  </button>
+                </div>
               </div>
-              <div id="liveStatus" class="live-status" aria-live="polite" title="Connection details" role="button" tabindex="0" data-diag="1">
+              <!-- Hidden live status kept for JS connection updates; opened via More → Connection -->
+              <div id="liveStatus" class="live-status" aria-live="polite" title="Connection details" role="button" tabindex="0" data-diag="1" hidden>
                 <span class="live-status-dot"></span>
                 <span id="liveStatusText" class="live-status-text">Connecting…</span>
               </div>
@@ -590,38 +628,138 @@
       </form>
       <button type="button" id="nameModalCancel" class="btn small-btn name-modal-cancel">Cancel</button>
     </div>
+  </div>
 
-    <!-- SECURITY DRAWER -->
-    <div id="securityDrawer" class="drawer hidden" aria-hidden="true">
-      <div class="drawer-backdrop" id="securityDrawerBackdrop"></div>
-      <div class="drawer-panel">
-        <div class="drawer-header">
+  <!-- SECURITY DRAWER -->
+  <div id="securityDrawer" class="drawer hidden" aria-hidden="true">
+    <div class="drawer-backdrop" id="securityDrawerBackdrop"></div>
+    <div class="drawer-panel security-panel">
+      <div class="drawer-handle" aria-hidden="true"></div>
+      <div class="drawer-header">
+        <div class="drawer-header-text">
           <h2><i class="fa-solid fa-shield-halved"></i> Meeting security</h2>
-          <button type="button" id="securityDrawerClose" class="btn icon-btn" title="Close">&times;</button>
+          <p class="drawer-sub">Control who can enter and what people can do in this meeting.</p>
         </div>
-        <div class="drawer-body">
-          <div class="sec-group">
-            <h3>Access</h3>
-            <label class="sec-row"><span>Waiting room</span><input type="checkbox" id="secWaitingRoom"></label>
-            <label class="sec-row"><span>Guest access</span><input type="checkbox" id="secGuestAccess"></label>
-            <label class="sec-row"><span>Meeting locked</span><input type="checkbox" id="secLocked"></label>
-          </div>
-          <div class="sec-group">
-            <h3>Participants</h3>
-            <label class="sec-row"><span>Screen sharing</span><input type="checkbox" id="secScreenShare"></label>
-            <label class="sec-row"><span>Microphone</span><input type="checkbox" id="secMicrophone"></label>
-            <label class="sec-row"><span>Chat</span><input type="checkbox" id="secChat"></label>
-            <label class="sec-row"><span>Reactions</span><input type="checkbox" id="secReactions"></label>
-            <label class="sec-row"><span>Raise hand</span><input type="checkbox" id="secRaiseHand"></label>
-          </div>
-          <div class="sec-group">
-            <h3>Invitations</h3>
-            <label class="sec-row"><span>Participants can invite</span><input type="checkbox" id="secPartInvite"></label>
-            <label class="sec-row"><span>Guests can invite</span><input type="checkbox" id="secGuestInvite"></label>
-          </div>
+        <button type="button" id="securityDrawerClose" class="btn icon-btn" title="Close" aria-label="Close">&times;</button>
+      </div>
+      <div class="drawer-body">
+        <div class="sec-group">
+          <h3>Access</h3>
+          <label class="sec-row">
+            <span class="sec-row-text">
+              <strong>Waiting room</strong>
+              <em>People wait until admitted</em>
+            </span>
+            <input type="checkbox" id="secWaitingRoom" class="sec-toggle">
+          </label>
+          <label class="sec-row">
+            <span class="sec-row-text">
+              <strong>Guest access</strong>
+              <em>Allow guests to join without an account</em>
+            </span>
+            <input type="checkbox" id="secGuestAccess" class="sec-toggle">
+          </label>
+          <label class="sec-row">
+            <span class="sec-row-text">
+              <strong>Lock meeting</strong>
+              <em>Prevent new people from joining</em>
+            </span>
+            <input type="checkbox" id="secLocked" class="sec-toggle">
+          </label>
+        </div>
+        <div class="sec-group">
+          <h3>Participation</h3>
+          <label class="sec-row">
+            <span class="sec-row-text">
+              <strong>Screen sharing</strong>
+              <em>Participants can share their screen</em>
+            </span>
+            <input type="checkbox" id="secScreenShare" class="sec-toggle">
+          </label>
+          <label class="sec-row">
+            <span class="sec-row-text">
+              <strong>Microphone</strong>
+              <em>Participants can unmute themselves</em>
+            </span>
+            <input type="checkbox" id="secMicrophone" class="sec-toggle">
+          </label>
+          <label class="sec-row">
+            <span class="sec-row-text">
+              <strong>Chat</strong>
+              <em>Participants can send messages</em>
+            </span>
+            <input type="checkbox" id="secChat" class="sec-toggle">
+          </label>
+          <label class="sec-row">
+            <span class="sec-row-text">
+              <strong>Reactions</strong>
+              <em>Emoji reactions during the meeting</em>
+            </span>
+            <input type="checkbox" id="secReactions" class="sec-toggle">
+          </label>
+          <label class="sec-row">
+            <span class="sec-row-text">
+              <strong>Raise hand</strong>
+              <em>Participants can raise their hand</em>
+            </span>
+            <input type="checkbox" id="secRaiseHand" class="sec-toggle">
+          </label>
+        </div>
+        <div class="sec-group">
+          <h3>Invitations</h3>
+          <label class="sec-row">
+            <span class="sec-row-text">
+              <strong>Participants can invite</strong>
+              <em>Signed-in participants may share invite links</em>
+            </span>
+            <input type="checkbox" id="secPartInvite" class="sec-toggle">
+          </label>
+          <label class="sec-row">
+            <span class="sec-row-text">
+              <strong>Guests can invite</strong>
+              <em>Guests may share the meeting link</em>
+            </span>
+            <input type="checkbox" id="secGuestInvite" class="sec-toggle">
+          </label>
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- Mobile People sheet -->
+  <div id="peopleSheet" class="mobile-sheet hidden" aria-hidden="true">
+    <div class="mobile-sheet-backdrop" id="peopleSheetBackdrop"></div>
+    <div class="mobile-sheet-panel">
+      <div class="drawer-handle" aria-hidden="true"></div>
+      <div class="mobile-sheet-header">
+        <h2>People</h2>
+        <button type="button" id="peopleSheetClose" class="btn icon-btn" aria-label="Close">&times;</button>
+      </div>
+      <div class="mobile-sheet-body" id="peopleSheetBody">
+        <!-- Populated / mirrored from sidebar on open via JS -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Mobile Chat sheet -->
+  <div id="chatSheet" class="mobile-sheet hidden" aria-hidden="true">
+    <div class="mobile-sheet-backdrop" id="chatSheetBackdrop"></div>
+    <div class="mobile-sheet-panel">
+      <div class="drawer-handle" aria-hidden="true"></div>
+      <div class="mobile-sheet-header">
+        <h2>Chat</h2>
+        <button type="button" id="chatSheetClose" class="btn icon-btn" aria-label="Close">&times;</button>
+      </div>
+      <div class="mobile-sheet-body chat-sheet-body" id="chatSheetBody">
+        <div class="chat-messages" id="chatSheetMessages"></div>
+        <form class="chat-form" id="chatSheetForm">
+          <input id="chatSheetInput" type="text" maxlength="2000" placeholder="Message…" autocomplete="off">
+          <button type="submit" class="btn icon-btn" aria-label="Send"><i class="fa-solid fa-paper-plane"></i></button>
+        </form>
+      </div>
+    </div>
+  </div>
+
 
     <!-- PARTICIPANT CONTEXT MENU -->
     <div id="participantMenu" class="context-menu hidden" role="menu"></div>
@@ -731,8 +869,6 @@
 
     <div id="toastHost" class="toast-host" aria-live="polite"></div>
 
-  </div>
-
   <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.9.1/dist/livekit-client.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.mjs" type="module"></script>
   <script>
@@ -743,14 +879,14 @@
     }).catch(() => null);
   </script>
 <!-- Phase 2 modular client -->
-  <script src="js/lib/events.js?v=20260924wrapAD2"></script>
-  <script src="js/lib/registry.js?v=20260924wrapAD2"></script>
-  <script src="js/features/chat.js?v=20260924wrapAD2"></script>
-  <script src="js/features/reactions.js?v=20260924wrapAD2"></script>
-  <script src="js/features/schedule.js?v=20260924wrapAD2"></script>
-  <script src="js/features/mute.js?v=20260924wrapAD2"></script>
-  <script src="js/features/device-icons.js?v=20260924wrapAD2"></script>
-  <script src="js/main.js?v=20260924wrapAD2"></script>
-  <script src="js/core/app.js?v=20260924wrapAD2"></script>
+  <script src="js/lib/events.js?v=20260924secMob1"></script>
+  <script src="js/lib/registry.js?v=20260924secMob1"></script>
+  <script src="js/features/chat.js?v=20260924secMob1"></script>
+  <script src="js/features/reactions.js?v=20260924secMob1"></script>
+  <script src="js/features/schedule.js?v=20260924secMob1"></script>
+  <script src="js/features/mute.js?v=20260924secMob1"></script>
+  <script src="js/features/device-icons.js?v=20260924secMob1"></script>
+  <script src="js/main.js?v=20260924secMob1"></script>
+  <script src="js/core/app.js?v=20260924secMob1"></script>
 </body>
 </html>

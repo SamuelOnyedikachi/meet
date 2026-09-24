@@ -38,7 +38,8 @@ const {
 } = require('../rooms/store');
 const { can, resolvePermissions } = require('../lib/permissions');
 const { endMeeting } = require('../rooms/lifecycle');
-const { createLiveKitToken, isLiveKitConfigured } = require('../livekit/tokens');
+const { createLiveKitToken, isLiveKitConfigured, grantsFromPermissions } = require('../livekit/tokens');
+const { signWsCredential } = require('../lib/wsCredential');
 const { features } = require('../lib/features');
 
 const {
@@ -342,8 +343,19 @@ function createRequestHandler() {
         || participant.name
         || 'Participant';
 
-      const token = await createLiveKitToken(participantId, participantName, code);
-      return sendJSON(res, 200, { token, url: LIVEKIT_URL, room: code });
+      const perms = resolvePermissions(meeting, participant);
+      const grants = grantsFromPermissions(perms);
+      const token = await createLiveKitToken(participantId, participantName, code, grants);
+      return sendJSON(res, 200, {
+        token,
+        url: LIVEKIT_URL,
+        room: code,
+        grants: {
+          canPublish: grants.canPublish,
+          canPublishData: grants.canPublishData,
+          canSubscribe: grants.canSubscribe,
+        },
+      });
     } catch (e) {
       console.error('[livekit-token]', e.message);
       return sendJSON(res, 500, { error: e.message || 'Failed to create token' });
@@ -456,6 +468,7 @@ function createRequestHandler() {
         });
       } catch (e) { console.warn('[membership] host', e.message); }
 
+      const hostWsCredential = signWsCredential({ participantId: hostId, code });
       return sendJSON(res, 200, {
         code,
         letters: code.slice(0, 3),
@@ -463,6 +476,7 @@ function createRequestHandler() {
         name,
         hostId,
         participantId: hostId,
+        wsCredential: hostWsCredential,
         role: 'host',
         participants: getParticipantsList(meeting),
         waiting: [],
@@ -636,6 +650,7 @@ function createRequestHandler() {
           numbers: code.slice(3),
           name: meeting.name,
           participantId: pid,
+          wsCredential: signWsCredential({ participantId: pid, code }),
           role,
           status: 'WAITING',
           waitingRoom: true,
@@ -678,6 +693,7 @@ function createRequestHandler() {
         numbers: code.slice(3),
         name: meeting.name,
         participantId: pid,
+        wsCredential: signWsCredential({ participantId: pid, code }),
         role: participant.role,
         status: 'ACTIVE',
         participants: getParticipantsList(meeting),

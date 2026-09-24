@@ -126,6 +126,7 @@
         participantId: meeting.participantId,
         participantName: meeting.participantName,
         isHost: !!meeting.isHost,
+        wsCredential: meeting.wsCredential || null,
       }));
     } catch (_) {}
   }
@@ -563,7 +564,12 @@
 
     socket.onopen = () => {
       setWsStatus('connected');
-      sendWS({ type: 'register', participantId: currentMeeting.participantId, code: currentMeeting.code });
+      sendWS({
+        type: 'register',
+        participantId: currentMeeting.participantId,
+        code: currentMeeting.code,
+        wsCredential: currentMeeting.wsCredential,
+      });
       // If we already published screen before WS was ready, re-announce so late joiners see our card
       if (isSharing) {
         sendWS({ type: 'start-share' });
@@ -1431,11 +1437,13 @@
   function updateShareButton() {
     if (!shareBtn) return;
     if (isSharing) {
-      shareBtn.classList.add('sharing-active');
-      shareBtn.innerHTML = '<i class="fa-solid fa-desktop"></i><span>Stop share</span>';
+      shareBtn.classList.add('sharing-active', 'sharing-state');
+      shareBtn.innerHTML = '<i class="fa-solid fa-desktop"></i><span>Stop</span>';
+      shareBtn.title = 'Stop sharing';
     } else {
-      shareBtn.classList.remove('sharing-active');
-      shareBtn.innerHTML = '<i class="fa-solid fa-desktop"></i><span>Share screen</span>';
+      shareBtn.classList.remove('sharing-active', 'sharing-state');
+      shareBtn.innerHTML = '<i class="fa-solid fa-desktop"></i><span>Share</span>';
+      shareBtn.title = 'Share screen';
     }
   }
 
@@ -1443,9 +1451,11 @@
     if (!micBtn) return;
     micBtn.classList.toggle('active', micOn);
     micBtn.classList.toggle('off', !micOn);
+    micBtn.classList.toggle('muted-state', !micOn);
     micBtn.innerHTML = micOn
       ? '<i class="fa-solid fa-microphone"></i><span>Mic</span>'
       : '<i class="fa-solid fa-microphone-slash"></i><span>Mic</span>';
+    micBtn.title = micOn ? 'Mute microphone (M)' : 'Unmute microphone (M)';
   }
 
   function getLocalScreenTrack() {
@@ -1868,6 +1878,7 @@
       name: data.name,
       participantId: data.participantId,
       participantName,
+      wsCredential: data.wsCredential || null,
       isHost: !!isHost || data.role === 'host',
       role: data.role || (isHost ? 'host' : 'participant'),
     };
@@ -3243,6 +3254,8 @@
   try { applySelfChatColor(); } catch (_) {}
 
   document.querySelectorAll('.emoji-btn').forEach(function (btn) {
+    if (btn.dataset.wired) return;
+    btn.dataset.wired = '1';
     btn.addEventListener('click', function () {
       var emoji = btn.getAttribute('data-emoji');
       if (emoji) sendWS({ type: 'reaction', emoji: emoji });
@@ -3508,22 +3521,40 @@
       }
     }
 
+    const isMobileSheet = window.matchMedia('(max-width: 700px)').matches;
+    if (isMobileSheet) {
+      // header with close for bottom sheet
+      html = `<div class="menu-sheet-top"><button type="button" class="menu-sheet-close" data-act="close-menu" aria-label="Close">&times;</button></div>` + html;
+    }
     menu.innerHTML = html;
     menu.classList.remove('hidden');
+    menu.classList.toggle('is-sheet', isMobileSheet);
     menu.style.display = 'block';
     menu.style.zIndex = '3000';
     menu.style.position = 'fixed';
 
-    const pad = 8;
-    // measure after visible
-    const mw = Math.max(menu.offsetWidth || 220, 200);
-    const mh = Math.max(menu.offsetHeight || 120, 80);
-    let left = typeof x === 'number' ? x : 40;
-    let top = typeof y === 'number' ? y : 40;
-    left = Math.min(Math.max(pad, left), window.innerWidth - mw - pad);
-    top = Math.min(Math.max(pad, top), window.innerHeight - mh - pad);
-    menu.style.left = left + 'px';
-    menu.style.top = top + 'px';
+    if (isMobileSheet) {
+      menu.style.left = '0px';
+      menu.style.right = '0px';
+      menu.style.bottom = '0px';
+      menu.style.top = 'auto';
+      menu.style.width = '100%';
+      menu.style.maxWidth = '100%';
+    } else {
+      const pad = 8;
+      const mw = Math.max(menu.offsetWidth || 280, 240);
+      const mh = Math.max(menu.offsetHeight || 120, 80);
+      let left = typeof x === 'number' ? x : 40;
+      let top = typeof y === 'number' ? y : 40;
+      left = Math.min(Math.max(pad, left), window.innerWidth - mw - pad);
+      top = Math.min(Math.max(pad, top), window.innerHeight - mh - pad);
+      menu.style.left = left + 'px';
+      menu.style.top = top + 'px';
+      menu.style.right = 'auto';
+      menu.style.bottom = 'auto';
+      menu.style.width = '';
+      menu.style.maxWidth = '';
+    }
 
     menu.onclick = (e) => {
       const permInput = e.target.closest('input[data-perm]');
@@ -3552,10 +3583,17 @@
           sendWS({ type: 'transfer-host', targetId: p.id });
         }
       }
+      if (act === 'close-menu') {
+        menu.classList.add('hidden');
+        menu.classList.remove('is-sheet');
+        menu.style.display = '';
+        return;
+      }
       if (act === 'admit') sendWS({ type: 'admit-participant', targetId: p.id });
       if (act === 'decline') sendWS({ type: 'decline-participant', targetId: p.id });
       if (act === 'remove') openRemoveModal(p);
       menu.classList.add('hidden');
+      menu.classList.remove('is-sheet');
       menu.style.display = '';
     };
 
@@ -3564,6 +3602,7 @@
     window.__meetMenuCloser = function (ev) {
       if (!menu.contains(ev.target) && !ev.target.closest('.participant-more')) {
         menu.classList.add('hidden');
+        menu.classList.remove('is-sheet');
         menu.style.display = '';
         document.removeEventListener('click', window.__meetMenuCloser);
         window.__meetMenuCloser = null;
@@ -3604,7 +3643,173 @@
     });
   }
 
+
+  function wireMeetingToolbar() {
+    if (window.__meetToolbarWired) return;
+    window.__meetToolbarWired = true;
+
+    const moreBtn = document.getElementById('meetingMoreBtn');
+    const morePanel = document.getElementById('meetingMorePanel');
+    function closeMore() {
+      if (!morePanel) return;
+      morePanel.classList.add('hidden');
+      if (moreBtn) moreBtn.setAttribute('aria-expanded', 'false');
+    }
+    function toggleMore(e) {
+      if (e) e.stopPropagation();
+      if (!morePanel) return;
+      const open = morePanel.classList.contains('hidden');
+      morePanel.classList.toggle('hidden', !open);
+      if (moreBtn) moreBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+    if (moreBtn) moreBtn.addEventListener('click', toggleMore);
+    document.addEventListener('click', (ev) => {
+      if (!morePanel || morePanel.classList.contains('hidden')) return;
+      if (morePanel.contains(ev.target) || (moreBtn && moreBtn.contains(ev.target))) return;
+      closeMore();
+    });
+
+    // Close more panel after a reaction is sent from inside it
+    morePanel?.addEventListener('click', (ev) => {
+      if (ev.target.closest('.emoji-btn')) closeMore();
+    });
+
+    const openDiag = () => {
+      if (typeof refreshDiagnostics === 'function') refreshDiagnostics();
+      if (typeof openDrawer === 'function') openDrawer('diagDrawer');
+      closeMore();
+    };
+    document.getElementById('moreConnectionBtn')?.addEventListener('click', openDiag);
+    document.getElementById('liveStatus')?.addEventListener('click', openDiag);
+
+    document.getElementById('moreActivityBtn')?.addEventListener('click', () => {
+      if (typeof openDrawer === 'function') openDrawer('activityDrawer');
+      closeMore();
+    });
+    document.getElementById('moreRecordBtn')?.addEventListener('click', () => {
+      document.getElementById('recordModal')?.classList.remove('hidden');
+      closeMore();
+    });
+    document.getElementById('moreInviteBtn')?.addEventListener('click', () => {
+      if (typeof openInviteDrawer === 'function') openInviteDrawer();
+      else document.getElementById('inviteDrawer')?.classList.remove('hidden');
+      closeMore();
+    });
+    document.getElementById('moreFullscreenBtn')?.addEventListener('click', () => {
+      document.getElementById('fullscreenBtn')?.click();
+      closeMore();
+    });
+
+    document.getElementById('toolbarChatBtn')?.addEventListener('click', () => {
+      if (window.matchMedia('(max-width: 700px)').matches) {
+        openChatSheet();
+        return;
+      }
+      const overlayBtn = document.getElementById('chatOverlayBtn');
+      if (overlayBtn) overlayBtn.click();
+      else {
+        const chat = document.querySelector('.chat-panel, #chatPanel, .panel-chat');
+        if (chat) chat.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    });
+    document.getElementById('toolbarPeopleBtn')?.addEventListener('click', () => {
+      if (window.matchMedia('(max-width: 700px)').matches) {
+        openPeopleSheet();
+        return;
+      }
+      const col = document.getElementById('col1');
+      if (col) {
+        col.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        const search = document.getElementById('peopleSearch');
+        if (search) setTimeout(() => search.focus(), 200);
+      }
+    });
+  }
+
+  function openPeopleSheet() {
+    const sheet = document.getElementById('peopleSheet');
+    const body = document.getElementById('peopleSheetBody');
+    if (!sheet || !body) return;
+    // Clone live people content from sidebar
+    const source = document.querySelector('#col1 .people-panel, #col1 .panel, #col1');
+    if (source) {
+      body.innerHTML = '';
+      const clone = source.cloneNode(true);
+      // Remove nested IDs that would duplicate; rebind 3-dot via event delegation on original render
+      clone.querySelectorAll('[id]').forEach((el) => el.removeAttribute('id'));
+      body.appendChild(clone);
+      // Wire participant-more clicks inside sheet to original handlers via data
+      body.querySelectorAll('.participant-more').forEach((btn, i) => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const original = document.querySelectorAll('#col1 .participant-more')[i];
+          if (original) original.click();
+        });
+      });
+    }
+    sheet.classList.remove('hidden');
+    sheet.setAttribute('aria-hidden', 'false');
+  }
+
+  function closePeopleSheet() {
+    const sheet = document.getElementById('peopleSheet');
+    if (!sheet) return;
+    sheet.classList.add('hidden');
+    sheet.setAttribute('aria-hidden', 'true');
+  }
+
+  function openChatSheet() {
+    const sheet = document.getElementById('chatSheet');
+    if (!sheet) return;
+    // Sync messages from main chat
+    const src = document.getElementById('chatMessages');
+    const dest = document.getElementById('chatSheetMessages');
+    if (src && dest) dest.innerHTML = src.innerHTML;
+    sheet.classList.remove('hidden');
+    sheet.setAttribute('aria-hidden', 'false');
+    const input = document.getElementById('chatSheetInput');
+    if (input) setTimeout(() => input.focus(), 150);
+  }
+
+  function closeChatSheet() {
+    const sheet = document.getElementById('chatSheet');
+    if (!sheet) return;
+    sheet.classList.add('hidden');
+    sheet.setAttribute('aria-hidden', 'true');
+  }
+
+  function wireMobileSheets() {
+    if (window.__meetSheetsWired) return;
+    window.__meetSheetsWired = true;
+    document.getElementById('peopleSheetClose')?.addEventListener('click', closePeopleSheet);
+    document.getElementById('peopleSheetBackdrop')?.addEventListener('click', closePeopleSheet);
+    document.getElementById('chatSheetClose')?.addEventListener('click', closeChatSheet);
+    document.getElementById('chatSheetBackdrop')?.addEventListener('click', closeChatSheet);
+
+    const form = document.getElementById('chatSheetForm');
+    form?.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const input = document.getElementById('chatSheetInput');
+      const mainInput = document.getElementById('chatInput');
+      const mainForm = document.getElementById('chatForm');
+      if (input && mainInput && mainForm) {
+        mainInput.value = input.value;
+        mainForm.requestSubmit ? mainForm.requestSubmit() : mainForm.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+        input.value = '';
+        // refresh sheet messages shortly after
+        setTimeout(() => {
+          const src = document.getElementById('chatMessages');
+          const dest = document.getElementById('chatSheetMessages');
+          if (src && dest) dest.innerHTML = src.innerHTML;
+        }, 120);
+      }
+    });
+  }
+
   function wirePhase1UI() {
+    wireMeetingToolbar();
+    wireMobileSheets();
     const peopleSearch = document.getElementById('peopleSearch');
     if (peopleSearch && !peopleSearch.dataset.wired) {
       peopleSearch.dataset.wired = '1';
