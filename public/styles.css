@@ -4217,3 +4217,11 @@ body.dark .notifications-list li { background: rgba(255,255,255,.04); }
   .side-tab .tab-label { display: none; }
   .side-tab { padding: 0.6rem 0.3rem; }
 }
+
+
+/* Raised hands only in Notifications — hide People-tab remnants */
+#raisedHandsLabel,
+#raisedHandsList,
+#lowerAllHandsBtn {
+  display: none !important;
+}

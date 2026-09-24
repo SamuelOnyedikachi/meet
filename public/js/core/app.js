@@ -628,6 +628,7 @@
           renderParticipants();
           renderCards();
         }
+        try { updateShareButton(); } catch (_) {}
         if ((msg.type === 'participant-left' || msg.type === 'share-stopped' || msg.type === 'participant-removed') && watchingId === msg.participantId) {
           clearBigView();
         }
@@ -738,7 +739,16 @@
         return;
       }
       if (msg.type === 'permissions-updated') {
-        if (msg.permissions) myPermissions = msg.permissions;
+        if (msg.permissions) {
+          myPermissions = Object.assign({}, myPermissions || {}, msg.permissions);
+          ensureModPermissions(msg.permissions);
+        }
+        try { updateShareButton(); } catch (_) {}
+        // If screen share revoked while sharing, stop locally
+        if (isSharing && myPermissions && myPermissions.screenShare === false &&
+            myRole !== 'host' && myRole !== 'cohost') {
+          try { stopShare(); } catch (_) {}
+        }
         showToast('Your permissions were updated');
         return;
       }
@@ -1100,8 +1110,11 @@
       } catch (_) {}
       const p = participants.find(x => x.id === identity);
       if (p && !p.sharing) { p.sharing = true; renderCards(); }
-      // Auto-watch only if nothing selected yet; never steal focus if user picked another card
-      if (!watchingId || watchingId === identity) {
+      // Auto-watch if nothing selected, same sharer, or previous watch target has no active screen
+      const prevHasScreen = watchingId && remoteMedia[watchingId] && remoteMedia[watchingId].screenTrack;
+      const stageEmpty = !document.getElementById('lkScreenVideo') ||
+        (bigPlaceholder && !bigPlaceholder.classList.contains('hidden'));
+      if (!watchingId || watchingId === identity || !prevHasScreen || stageEmpty) {
         watchingId = identity;
         attachScreenToBigView(track, identity);
         renderCards();
@@ -1439,6 +1452,19 @@
 
   function updateShareButton() {
     if (!shareBtn) return;
+    const allowed = !!(myPermissions && myPermissions.screenShare !== false) ||
+      myRole === 'host' || myRole === 'cohost' || !!(currentMeeting && currentMeeting.isHost);
+    // Hosts/cohosts always may share; others follow meeting/role permissions
+    const canShare = myRole === 'host' || myRole === 'cohost' || !!(currentMeeting && currentMeeting.isHost)
+      ? true
+      : !!(myPermissions && myPermissions.screenShare);
+    if (!canShare && !isSharing) {
+      shareBtn.classList.add('hidden');
+      shareBtn.setAttribute('aria-hidden', 'true');
+      return;
+    }
+    shareBtn.classList.remove('hidden');
+    shareBtn.removeAttribute('aria-hidden');
     if (isSharing) {
       shareBtn.classList.add('sharing-active', 'sharing-state');
       shareBtn.innerHTML = '<i class="fa-solid fa-desktop"></i><span>Stop</span>';
@@ -1697,41 +1723,11 @@
       participantList.appendChild(more);
     }
 
-    // Raised hands section
-    if (raisedListEl && raisedLabel) {
-      if (raisedHands && raisedHands.length) {
-        raisedLabel.classList.remove('hidden');
-        raisedLabel.textContent = `Raised hands · ${raisedHands.length}`;
-        if (myPermissions.lowerHands && raisedListEl && !document.getElementById('lowerAllHandsBtn')) {
-          const lowerAll = document.createElement('button');
-          lowerAll.type = 'button';
-          lowerAll.id = 'lowerAllHandsBtn';
-          lowerAll.className = 'btn small-btn';
-          lowerAll.textContent = 'Lower all';
-          lowerAll.style.marginBottom = '0.35rem';
-          lowerAll.addEventListener('click', () => sendWS({ type: 'lower-all-hands' }));
-          raisedListEl.parentNode?.insertBefore(lowerAll, raisedListEl);
-        }
-        raisedHands.forEach((h, i) => {
-          const p = participants.find((x) => x.id === h.id) || h;
-          const li = document.createElement('li');
-          li.className = 'participant-item';
-          const sec = h.elapsedMs != null ? Math.round(h.elapsedMs / 1000) + 's' : '';
-          li.innerHTML = `<span class="p-name">① ${escapeHtml(p.name || h.name)} ${sec ? '<span class="me-tag">' + sec + '</span>' : ''}</span>`;
-          if (myPermissions.lowerHands) {
-            const btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = 'btn small-btn';
-            btn.textContent = 'Lower';
-            btn.addEventListener('click', () => sendWS({ type: 'lower-hand', targetId: h.id }));
-            li.appendChild(btn);
-          }
-          raisedListEl.appendChild(li);
-        });
-      } else {
-        raisedLabel.classList.add('hidden');
-      }
-    }
+    // Raised hands live only in Notifications tab — remove any leftover People UI
+    if (raisedLabel) raisedLabel.classList.add('hidden');
+    if (raisedListEl) raisedListEl.innerHTML = '';
+    const orphanLowerAll = document.getElementById('lowerAllHandsBtn');
+    if (orphanLowerAll) orphanLowerAll.remove();
 
     // Waiting section
     if (waitingListEl && waitingLabel) {
@@ -1781,6 +1777,8 @@
         });
       } else {
         waitingLabel.classList.add('hidden');
+        const bulk = document.getElementById('waitingBulkActions');
+        if (bulk) bulk.remove();
       }
     }
 
@@ -2041,8 +2039,17 @@
   leaveBtn?.addEventListener('click', leaveMeeting);
   micBtn?.addEventListener('click', toggleMic);
   shareBtn?.addEventListener('click', async () => {
-    if (isSharing) await stopShare();
-    else await startShare();
+    if (isSharing) {
+      await stopShare();
+      return;
+    }
+    const canShare = myRole === 'host' || myRole === 'cohost' || !!(currentMeeting && currentMeeting.isHost)
+      || !!(myPermissions && myPermissions.screenShare);
+    if (!canShare) {
+      showToast('Screen sharing is disabled for your role');
+      return;
+    }
+    await startShare();
   });
 
   // Screen quality controls (send = encode, view = subscribe / hide video)
@@ -4644,7 +4651,7 @@
             admit.textContent = "Admit";
             admit.addEventListener("click", (e) => {
               e.stopPropagation();
-              sendWS({ type: "admit", targetId: n.meta.participantId });
+              sendWS({ type: "admit-participant", targetId: n.meta.participantId });
               n.attended = true;
               renderNotifications();
             });
@@ -4654,7 +4661,7 @@
             deny.textContent = "Deny";
             deny.addEventListener("click", (e) => {
               e.stopPropagation();
-              sendWS({ type: "deny", targetId: n.meta.participantId });
+              sendWS({ type: "decline-participant", targetId: n.meta.participantId });
               n.attended = true;
               renderNotifications();
             });

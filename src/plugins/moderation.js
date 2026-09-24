@@ -296,8 +296,31 @@ module.exports = {
         'chat', 'reactions', 'raiseHand',
         'participantsCanInvite', 'guestsCanInvite',
       ];
+      const prevShare = s.participantScreenShare !== false;
       for (const k of keys) {
         if (typeof patch[k] === 'boolean') s[k] = patch[k];
+      }
+      const shareAllowed = s.participantScreenShare !== false;
+      // Push resolved permissions to every active non-host so UI updates without reload
+      for (const [pid, p] of meeting.participants) {
+        if (!p || p.status !== 'ACTIVE') continue;
+        const perms = require('../lib/permissions').resolvePermissions(meeting, p);
+        sendToParticipant(pid, {
+          type: 'permissions-updated',
+          permissions: perms,
+        });
+        // If screen share was turned off for non-moderators, force-stop their share
+        if (prevShare && !shareAllowed && !isModerator(p) && p.sharing) {
+          p.sharing = false;
+          sendToParticipant(pid, {
+            type: 'force-stop-share',
+            byName: actor.name || 'Host',
+          });
+          broadcast(meetingCode, {
+            type: 'share-stopped',
+            participantId: pid,
+          });
+        }
       }
       emitSecurity(meetingCode, meeting);
       emitRoster(meetingCode, meeting);

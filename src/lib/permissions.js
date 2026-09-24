@@ -120,9 +120,12 @@ function resolvePermissions(meeting, participant) {
   const roleOverrides = (settings.roleOverrides && settings.roleOverrides[role]) || {};
   Object.assign(base, roleOverrides);
 
-  // Meeting-level capability gates for non-moderators
+  // Meeting-level capability gates for non-moderators (participants + guests)
   if (role === 'participant' || role === 'guest') {
-    if (settings.participantScreenShare === false) base.screenShare = false;
+    // Explicit meeting toggle drives screen share for both participants and guests
+    if (typeof settings.participantScreenShare === 'boolean') {
+      base.screenShare = !!settings.participantScreenShare;
+    }
     if (settings.participantMicrophone === false) base.microphone = false;
     if (settings.participantCamera === false) base.camera = false;
     if (settings.chat === false) base.chat = false;
