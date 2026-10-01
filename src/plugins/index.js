@@ -7,6 +7,7 @@ const content = require('./content');
 const moderation = require('./moderation');
 const activity = require('./activity');
 const recording = require('./recording');
+const screenTimeline = require('./screenTimeline');
 
 function registerBuiltinPlugins() {
   registerPlugin(chat);
@@ -17,6 +18,7 @@ function registerBuiltinPlugins() {
   registerPlugin(moderation);
   registerPlugin(activity);
   registerPlugin(recording);
+  registerPlugin(screenTimeline);
 }
 
 module.exports = {

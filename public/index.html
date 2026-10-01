@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link rel="stylesheet" href="styles.css?v=20260925mobileFix2">
+  <link rel="stylesheet" href="styles.css?v=20261002mobileFirst">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤝</text></svg>">
 </head>
 <body>
@@ -425,7 +425,15 @@
       <section class="col col-2" id="col2">
         <div class="panel">
           <div class="content meeting-content">
-            <div class="meeting-title-bar">
+            <!-- Mobile line1: icon + meeting name + 3dots -->
+            <div class="mobile-meet-header mobile-only" id="mobileMeetHeader">
+              <span class="mobile-meet-logo" aria-hidden="true"><i class="fa-solid fa-video"></i></span>
+              <span class="mobile-meet-name" id="mobileMeetName">Meeting</span>
+              <button type="button" id="mobileMeetMoreBtn" class="btn icon-btn" title="More" aria-label="More" aria-haspopup="true">
+                <i class="fa-solid fa-ellipsis-vertical"></i>
+              </button>
+            </div>
+            <div class="meeting-title-bar desktop-only">
               <span id="meetingNameLabel" class="meeting-name-label hidden"></span>
               <span id="recordingBadge" class="recording-badge hidden"><span class="rec-dot"></span> Recording <span id="recordingTimer"></span></span>
               <button id="shareLinkBtn" class="btn small-btn hidden" title="Copy invite link" aria-hidden="true">
@@ -435,7 +443,24 @@
                 <i class="fa-solid fa-phone-slash"></i> End
               </button>
             </div>
-            <div class="screen-cards" id="screenCards"></div>
+            <div class="screen-cards desktop-only" id="screenCards"></div>
+            <div class="desktop-screen-timeline desktop-only" id="desktopScreenTimeline">
+              <div class="st-header">
+                <span class="st-title"><i class="fa-solid fa-images"></i> Screen timeline</span>
+                <label class="st-slideshow-toggle" title="Slideshow on/off">
+                  <input type="checkbox" id="stSlideshowToggleDesktop">
+                  <span>Slideshow</span>
+                </label>
+              </div>
+              <div class="st-slots" id="stSlotsDesktop">
+                <p class="st-empty" id="stEmptyDesktop">No timeline images. Hosts can add up to 3.</p>
+              </div>
+              <div class="st-actions host-only hidden" id="stActionsDesktop">
+                <button type="button" class="btn small-btn primary-btn" id="stAddImagesBtnDesktop"><i class="fa-solid fa-plus"></i> Add images</button>
+                <input type="file" id="stImageInputDesktop" accept="image/*" multiple hidden>
+              </div>
+            </div>
+            <div class="meet-stage-row" id="meetStageRow">
             <div class="big-view" id="bigView">
               <video id="remoteVideo" autoplay playsinline></video>
               <div id="contentView" class="content-view hidden">
@@ -504,8 +529,60 @@
                   <button type="submit" class="btn icon-btn"><i class="fa-solid fa-paper-plane"></i></button>
                 </form>
               </div>
+            </div><!-- /.big-view -->
+
+            <!-- Dynamic panel: mobile/tablet secondary surface for screens, chat, people, more, reactions, security -->
+            <div class="dynamic-panel" id="dynamicPanel" aria-live="polite">
+              <div class="dynamic-panel-header">
+                <h3 id="dynamicPanelTitle">Screens</h3>
+                <button type="button" id="dynamicPanelClose" class="btn icon-btn" title="Close panel" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+              </div>
+              <div class="dynamic-panel-body" id="dynamicPanelBody">
+                <div class="dyn-pane" data-pane="screens" id="dynPaneScreens">
+                  <div class="screen-timeline" id="screenTimeline">
+                    <div class="st-header">
+                      <span class="st-title"><i class="fa-solid fa-images"></i> Screen timeline</span>
+                      <label class="st-slideshow-toggle" title="Slideshow on/off">
+                        <input type="checkbox" id="stSlideshowToggle">
+                        <span>Slideshow</span>
+                      </label>
+                    </div>
+                    <div class="st-slots" id="stSlots">
+                      <p class="st-empty" id="stEmpty">No timeline images yet. Hosts can add up to 3 images.</p>
+                    </div>
+                    <div class="st-actions host-only hidden" id="stActions">
+                      <button type="button" class="btn small-btn primary-btn" id="stAddImagesBtn"><i class="fa-solid fa-plus"></i> Add images</button>
+                      <input type="file" id="stImageInput" accept="image/*" multiple hidden>
+                    </div>
+                  </div>
+                  <div class="dyn-screens-list" id="dynScreensList"></div>
+                  <div class="dyn-share-actions">
+                    <button type="button" class="btn primary-btn full-width" id="dynShareBtn"><i class="fa-solid fa-desktop"></i> Share screen</button>
+                  </div>
+                </div>
+                <div class="dyn-pane hidden" data-pane="chat" id="dynPaneChat"></div>
+                <div class="dyn-pane hidden" data-pane="people" id="dynPanePeople"></div>
+                <div class="dyn-pane hidden" data-pane="reactions" id="dynPaneReactions">
+                  <div class="reaction-row dyn-reaction-row" id="dynEmojiBar">
+                    <button type="button" class="emoji-btn" data-emoji="👍" title="Thumbs up">👍</button>
+                    <button type="button" class="emoji-btn" data-emoji="👏" title="Clap">👏</button>
+                    <button type="button" class="emoji-btn" data-emoji="❤️" title="Heart">❤️</button>
+                    <button type="button" class="emoji-btn" data-emoji="😂" title="Laugh">😂</button>
+                    <button type="button" class="emoji-btn" data-emoji="🎉" title="Celebrate">🎉</button>
+                    <button type="button" class="emoji-btn" data-emoji="😮" title="Wow">😮</button>
+                    <button type="button" class="emoji-btn" data-emoji="🙏" title="Thanks">🙏</button>
+                  </div>
+                  <div class="recent-reactions" id="recentReactions">
+                    <p class="st-empty">Recent reactions will appear here</p>
+                  </div>
+                </div>
+                <div class="dyn-pane hidden" data-pane="security" id="dynPaneSecurity"></div>
+                <div class="dyn-pane hidden" data-pane="more" id="dynPaneMore"></div>
+              </div>
             </div>
-            <div class="call-controls toolbar-pill" role="toolbar" aria-label="Meeting controls">
+            </div><!-- /.meet-stage-row -->
+
+            <div class="call-controls toolbar-pill desktop-only" role="toolbar" aria-label="Meeting controls">
               <button id="micBtn" class="btn call-btn" title="Microphone (M)" aria-label="Toggle microphone">
                 <i class="fa-solid fa-microphone"></i>
                 <span>Mic</span>
@@ -592,6 +669,35 @@
                 <span id="liveStatusText" class="live-status-text">Connecting…</span>
               </div>
             </div>
+
+            <!-- Mobile footer nav: mic, screen, hand, heart, chat, people, security, 3dots -->
+            <nav class="mobile-footer-nav mobile-only" id="mobileFooterNav" role="toolbar" aria-label="Meeting controls">
+              <button type="button" class="mfn-btn" id="mfnMic" title="Microphone" aria-label="Toggle microphone">
+                <i class="fa-solid fa-microphone"></i>
+              </button>
+              <button type="button" class="mfn-btn" id="mfnScreen" title="Screens" aria-label="Screens" data-pane="screens">
+                <i class="fa-solid fa-desktop"></i>
+              </button>
+              <button type="button" class="mfn-btn" id="mfnHand" title="Raise hand" aria-label="Raise hand">
+                <i class="fa-solid fa-hand"></i>
+              </button>
+              <button type="button" class="mfn-btn" id="mfnHeart" title="React (tap heart, hold for more)" aria-label="Reactions">
+                <i class="fa-solid fa-heart"></i>
+              </button>
+              <button type="button" class="mfn-btn" id="mfnChat" title="Chat" aria-label="Chat" data-pane="chat">
+                <i class="fa-solid fa-comment"></i>
+                <span class="mfn-badge hidden" id="mfnChatBadge">0</span>
+              </button>
+              <button type="button" class="mfn-btn" id="mfnPeople" title="People" aria-label="People" data-pane="people">
+                <i class="fa-solid fa-users"></i>
+              </button>
+              <button type="button" class="mfn-btn hidden" id="mfnSecurity" title="Security" aria-label="Security" data-pane="security">
+                <i class="fa-solid fa-shield-halved"></i>
+              </button>
+              <button type="button" class="mfn-btn" id="mfnMore" title="More" aria-label="More" data-pane="more">
+                <i class="fa-solid fa-ellipsis"></i>
+              </button>
+            </nav>
           </div>
         </div>
       </section>
@@ -808,8 +914,22 @@
       <div class="mobile-sheet-body chat-sheet-body" id="chatSheetBody">
         <div class="chat-messages" id="chatSheetMessages"></div>
         <form class="chat-form" id="chatSheetForm">
-          <input id="chatSheetInput" type="text" maxlength="2000" placeholder=" Message... " autocomplete="off">
-          <button type="submit" class="btn icon-btn" aria-label="Send"><i class="fa-solid fa-paper-plane"></i></button>
+          <div class="chat-form-row chat-form-row-input">
+            <input id="chatSheetInput" type="text" maxlength="2000" placeholder=" Message... " autocomplete="off">
+            <button type="submit" class="btn icon-btn chat-send-btn" aria-label="Send"><i class="fa-solid fa-paper-plane"></i></button>
+          </div>
+          <div class="chat-form-row chat-form-row-tools">
+            <button type="button" id="chatSheetImageBtn" class="btn icon-btn" title="Send image (WebP)">
+              <i class="fa-regular fa-image"></i>
+            </button>
+            <button type="button" id="chatSheetAttachBtn" class="btn icon-btn" title="Attach file">
+              <i class="fa-solid fa-paperclip"></i>
+            </button>
+            <button type="button" id="chatSheetVoiceBtn" class="btn icon-btn" title="Voice note">
+              <i class="fa-solid fa-microphone"></i>
+            </button>
+            <span id="chatSheetVoiceStatus" class="chat-voice-status hidden"></span>
+          </div>
         </form>
       </div>
     </div>
@@ -942,6 +1062,6 @@
   <script src="js/features/mute.js?v=20260924secMob1"></script>
   <script src="js/features/device-icons.js?v=20260924secMob1"></script>
   <script src="js/main.js?v=20260924secMob1"></script>
-  <script src="js/core/app.js?v=20260925mobileFix2"></script>
+  <script src="js/core/app.js?v=20261002mobileFirst"></script>
 </body>
 </html>

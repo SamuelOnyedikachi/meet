@@ -442,9 +442,48 @@
       openAuthModal('login');
       return;
     }
-    homeView?.classList.add('hidden');
-    meetingView?.classList.add('hidden');
-    historyView?.classList.remove('hidden');
+    // Never kick the user out of an active meeting (mobile 3-dots History)
+    const inCall = !!(currentMeeting && meetingView && !meetingView.classList.contains('hidden'));
+    if (inCall && typeof window.__openDynamicPane === 'function' && window.matchMedia('(max-width: 900px)').matches) {
+      window.__openDynamicPane('more', 'History');
+      const pane = document.getElementById('dynPaneMore');
+      if (pane) {
+        pane.innerHTML = '<p class="st-empty">Loading history…</p>';
+        try {
+          const data = await api('/api/history');
+          const items = data.history || [];
+          if (!items.length) {
+            pane.innerHTML = '<p class="st-empty">No past meetings.</p>';
+          } else {
+            const ul = document.createElement('ul');
+            ul.className = 'history-list';
+            items.forEach((h) => {
+              const li = document.createElement('li');
+              li.className = 'history-item';
+              li.innerHTML = `<div class="history-item-main"><strong>${escapeHtml(h.name)}</strong>
+                <span class="history-code">${escapeHtml((h.code || '').slice(0, 3))}—${escapeHtml((h.code || '').slice(3))}</span></div>`;
+              ul.appendChild(li);
+            });
+            pane.innerHTML = '';
+            pane.appendChild(ul);
+          }
+        } catch (e) {
+          pane.innerHTML = `<p class="error-msg">${escapeHtml(e.message || 'Failed')}</p>`;
+        }
+      }
+      return;
+    }
+    if (inCall) {
+      historyView?.classList.remove('hidden');
+      historyView.style.position = 'fixed';
+      historyView.style.inset = '0';
+      historyView.style.zIndex = '1400';
+      historyView.style.background = 'var(--bg)';
+    } else {
+      homeView?.classList.add('hidden');
+      meetingView?.classList.add('hidden');
+      historyView?.classList.remove('hidden');
+    }
     historyDetail?.classList.add('hidden');
     historyList?.classList.remove('hidden');
 
@@ -515,7 +554,18 @@
   }
 
   historyBtn?.addEventListener('click', showHistory);
-  historyCloseBtn?.addEventListener('click', showHome);
+  historyCloseBtn?.addEventListener('click', () => {
+    const inCall = !!(currentMeeting && meetingView && !meetingView.classList.contains('hidden'));
+    if (inCall) {
+      historyView?.classList.add('hidden');
+      historyView.style.position = '';
+      historyView.style.inset = '';
+      historyView.style.zIndex = '';
+      historyView.style.background = '';
+      return;
+    }
+    showHome();
+  });
   historyDetailBack?.addEventListener('click', () => {
     historyDetail?.classList.add('hidden');
     showHistory();
@@ -2006,6 +2056,23 @@
     copyCodeBtn?.classList.remove('hidden');
     updateMeetingChrome();
 
+    // Mobile-first: enter fullscreen meeting UI
+    try {
+      document.body.classList.add('in-meeting-mobile');
+      const mobileName = document.getElementById('mobileMeetName');
+      if (mobileName) {
+        mobileName.textContent = currentMeeting.name || formatCode(currentMeeting.letters, currentMeeting.numbers);
+      }
+      if (window.matchMedia('(max-width: 900px)').matches) {
+        const el = document.documentElement;
+        if (!document.fullscreenElement && el.requestFullscreen) {
+          el.requestFullscreen().catch(() => {});
+        }
+      }
+      if (typeof window.__syncMobileChrome === 'function') window.__syncMobileChrome();
+      if (typeof window.__initScreenTimeline === 'function') window.__initScreenTimeline();
+    } catch (_) {}
+
     renderParticipants();
     renderCards();
     connectWS();
@@ -2043,6 +2110,11 @@
     copyCodeBtn?.classList.add('hidden');
     $('meetingNameTop')?.classList.add('hidden');
     $('shareLinkBtnTop')?.classList.add('hidden');
+    document.body.classList.remove('in-meeting-mobile');
+    try {
+      if (document.fullscreenElement) document.exitFullscreen?.();
+    } catch (_) {}
+    if (typeof window.__resetScreenTimeline === 'function') window.__resetScreenTimeline();
     $('endMeetBtnTop')?.classList.add('hidden');
     if (typeof syncMoreMenuInCall === 'function') syncMoreMenuInCall();
     setWsStatus('left');
@@ -5002,5 +5074,547 @@
       });
     }
   })();
+
+
+  /* =========================================================
+     Mobile-first meeting UX + Screen timeline
+     ========================================================= */
+  (function mobileMeetUX() {
+    var screenTimeline = [];
+    var slideshowOn = false;
+    var slideshowTimer = null;
+    var slideshowIdx = 0;
+    var recentReactions = [];
+    var activePane = 'screens';
+
+    function isMobileLayout() {
+      return window.matchMedia('(max-width: 900px)').matches;
+    }
+
+    function openDynamicPane(pane, title) {
+      activePane = pane || 'screens';
+      var panel = document.getElementById('dynamicPanel');
+      var titleEl = document.getElementById('dynamicPanelTitle');
+      if (titleEl) titleEl.textContent = title || ({
+        screens: 'Screens', chat: 'Chat', people: 'People',
+        reactions: 'Reactions', security: 'Security', more: 'More'
+      }[activePane] || 'Panel');
+      document.querySelectorAll('.dyn-pane').forEach(function (p) {
+        p.classList.toggle('hidden', p.getAttribute('data-pane') !== activePane);
+      });
+      if (panel) panel.classList.add('open');
+      document.querySelectorAll('.mfn-btn[data-pane]').forEach(function (b) {
+        b.classList.toggle('active', b.getAttribute('data-pane') === activePane);
+      });
+      if (activePane === 'screens') refreshDynScreens();
+      if (activePane === 'chat') fillDynChat();
+      if (activePane === 'people') fillDynPeople();
+      if (activePane === 'more') fillDynMore();
+      if (activePane === 'security') fillDynSecurity();
+      if (activePane === 'reactions') renderRecentReactions();
+    }
+    window.__openDynamicPane = openDynamicPane;
+
+    function closeDynamicPane() {
+      var panel = document.getElementById('dynamicPanel');
+      if (panel) panel.classList.remove('open');
+      document.querySelectorAll('.mfn-btn[data-pane]').forEach(function (b) {
+        b.classList.remove('active');
+      });
+    }
+
+    document.getElementById('dynamicPanelClose')?.addEventListener('click', closeDynamicPane);
+
+    function syncMobileChrome() {
+      var name = document.getElementById('mobileMeetName');
+      if (name && currentMeeting) {
+        name.textContent = currentMeeting.name || formatCode(currentMeeting.letters, currentMeeting.numbers);
+      }
+      var mfnMic = document.getElementById('mfnMic');
+      var mic = document.getElementById('micBtn');
+      if (mfnMic && mic) {
+        var muted = mic.classList.contains('off') || mic.classList.contains('muted-state');
+        mfnMic.className = 'mfn-btn' + (muted ? ' muted-state' : '');
+        mfnMic.innerHTML = muted
+          ? '<i class="fa-solid fa-microphone-slash"></i>'
+          : '<i class="fa-solid fa-microphone"></i>';
+      }
+      var sec = document.getElementById('securityBtn');
+      var mfnSec = document.getElementById('mfnSecurity');
+      if (mfnSec && sec) {
+        mfnSec.classList.toggle('hidden', sec.classList.contains('hidden'));
+      }
+      var canEdit = !!(currentMeeting && (currentMeeting.isHost || myRole === 'host' || myRole === 'cohost' || myRole === 'participant'));
+      ['stActions', 'stActionsDesktop'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) el.classList.toggle('hidden', !canEdit);
+      });
+      if (isMobileLayout()) {
+        var panel = document.getElementById('dynamicPanel');
+        if (panel && !panel.classList.contains('open')) {
+          openDynamicPane('screens', 'Screens');
+        }
+      }
+    }
+    window.__syncMobileChrome = syncMobileChrome;
+
+    document.getElementById('mfnMic')?.addEventListener('click', function () {
+      document.getElementById('micBtn')?.click();
+      setTimeout(syncMobileChrome, 80);
+    });
+    document.getElementById('mfnScreen')?.addEventListener('click', function () {
+      openDynamicPane('screens', 'Screens');
+    });
+    document.getElementById('mfnHand')?.addEventListener('click', function () {
+      document.getElementById('raiseHandBtn')?.click();
+    });
+    document.getElementById('mfnChat')?.addEventListener('click', function () {
+      if (isMobileLayout()) openDynamicPane('chat', 'Chat');
+      else document.getElementById('toolbarChatBtn')?.click();
+    });
+    document.getElementById('mfnPeople')?.addEventListener('click', function () {
+      if (isMobileLayout()) openDynamicPane('people', 'People');
+      else document.getElementById('toolbarPeopleBtn')?.click();
+    });
+    document.getElementById('mfnSecurity')?.addEventListener('click', function () {
+      if (isMobileLayout()) openDynamicPane('security', 'Security');
+      else document.getElementById('securityBtn')?.click();
+    });
+    document.getElementById('mfnMore')?.addEventListener('click', function () {
+      if (isMobileLayout()) openDynamicPane('more', 'More');
+      else document.getElementById('meetingMoreBtn')?.click();
+    });
+    document.getElementById('mobileMeetMoreBtn')?.addEventListener('click', function () {
+      openDynamicPane('more', 'More');
+    });
+
+    (function wireHeart() {
+      var btn = document.getElementById('mfnHeart');
+      if (!btn) return;
+      var longPress = false;
+      var timer = null;
+      btn.addEventListener('pointerdown', function () {
+        longPress = false;
+        timer = setTimeout(function () {
+          longPress = true;
+          openDynamicPane('reactions', 'Reactions');
+        }, 420);
+      });
+      function endPress() {
+        if (timer) clearTimeout(timer);
+        timer = null;
+        if (!longPress && currentMeeting) {
+          try { sendWS({ type: 'reaction', emoji: '❤️' }); } catch (_) {}
+        }
+      }
+      btn.addEventListener('pointerup', endPress);
+      btn.addEventListener('pointerleave', function () { if (timer) clearTimeout(timer); timer = null; });
+      btn.addEventListener('pointercancel', function () { if (timer) clearTimeout(timer); timer = null; });
+    })();
+
+    document.getElementById('dynShareBtn')?.addEventListener('click', function () {
+      document.getElementById('shareBtn')?.click();
+    });
+
+    function refreshDynScreens() {
+      var list = document.getElementById('dynScreensList');
+      if (!list) return;
+      list.innerHTML = '';
+      var src = document.getElementById('screenCards');
+      if (src) {
+        src.querySelectorAll('.screen-card').forEach(function (c) {
+          var clone = c.cloneNode(true);
+          clone.addEventListener('click', function () { c.click(); });
+          list.appendChild(clone);
+        });
+      }
+      renderTimelineSlots();
+    }
+
+    function fillDynChat() {
+      var pane = document.getElementById('dynPaneChat');
+      if (!pane) return;
+      var src = document.getElementById('chatMessages');
+      pane.innerHTML = '';
+      var msgs = document.createElement('div');
+      msgs.className = 'chat-messages';
+      msgs.id = 'dynChatMessages';
+      if (src) msgs.innerHTML = src.innerHTML;
+      pane.appendChild(msgs);
+      var form = document.createElement('form');
+      form.className = 'chat-form';
+      form.innerHTML =
+        '<div class="chat-form-row chat-form-row-input">' +
+        '<input type="text" id="dynChatInput" maxlength="2000" placeholder=" Message... " autocomplete="off">' +
+        '<button type="submit" class="btn icon-btn chat-send-btn" title="Send"><i class="fa-solid fa-paper-plane"></i></button>' +
+        '</div>' +
+        '<div class="chat-form-row chat-form-row-tools">' +
+        '<button type="button" class="btn icon-btn" id="dynChatImageBtn" title="Send image"><i class="fa-regular fa-image"></i></button>' +
+        '<button type="button" class="btn icon-btn" id="dynChatVoiceBtn" title="Voice note"><i class="fa-solid fa-microphone"></i></button>' +
+        '</div>';
+      pane.appendChild(form);
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var input = document.getElementById('dynChatInput');
+        var mainInput = document.getElementById('chatInput');
+        if (input && mainInput) {
+          mainInput.value = input.value;
+          var cf = document.getElementById('chatForm');
+          if (cf) {
+            if (typeof cf.requestSubmit === 'function') cf.requestSubmit();
+            else cf.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+          }
+          input.value = '';
+          setTimeout(function () { if (src) msgs.innerHTML = src.innerHTML; }, 120);
+        }
+      });
+      document.getElementById('dynChatImageBtn')?.addEventListener('click', function () {
+        document.getElementById('chatImageBtn')?.click();
+      });
+      document.getElementById('dynChatVoiceBtn')?.addEventListener('click', function () {
+        document.getElementById('chatVoiceBtn')?.click();
+      });
+    }
+
+    function fillDynPeople() {
+      var pane = document.getElementById('dynPanePeople');
+      if (!pane) return;
+      var source = document.querySelector('#peopleTab') || document.querySelector('#col1 .people-panel');
+      if (!source) { pane.innerHTML = '<p class="st-empty">No participants</p>'; return; }
+      pane.innerHTML = '';
+      var clone = source.cloneNode(true);
+      clone.querySelectorAll('[id]').forEach(function (el) { el.removeAttribute('id'); });
+      pane.appendChild(clone);
+    }
+
+    function fillDynMore() {
+      var pane = document.getElementById('dynPaneMore');
+      if (!pane) return;
+      var more = document.getElementById('meetingMorePanel');
+      pane.innerHTML = '';
+      if (more) {
+        var clone = more.cloneNode(true);
+        clone.classList.remove('hidden');
+        clone.style.position = 'static';
+        clone.style.boxShadow = 'none';
+        clone.style.border = 'none';
+        clone.querySelectorAll('[id]').forEach(function (el) { el.removeAttribute('id'); });
+        pane.appendChild(clone);
+        var histBtn = document.createElement('button');
+        histBtn.type = 'button';
+        histBtn.className = 'more-item';
+        histBtn.innerHTML = '<i class="fa-solid fa-clock-rotate-left"></i> History';
+        histBtn.addEventListener('click', function () { showHistory(); });
+        pane.appendChild(histBtn);
+        pane.querySelectorAll('.emoji-btn').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            var emoji = btn.getAttribute('data-emoji');
+            if (emoji) try { sendWS({ type: 'reaction', emoji: emoji }); } catch (_) {}
+          });
+        });
+        pane.querySelectorAll('.more-item').forEach(function (btn) {
+          if (btn === histBtn) return;
+          var act = btn.getAttribute('data-act');
+          btn.addEventListener('click', function () {
+            var orig = document.querySelector('#meetingMorePanel .more-item[data-act="' + act + '"]');
+            if (orig) orig.click();
+          });
+        });
+      }
+    }
+
+    function fillDynSecurity() {
+      var pane = document.getElementById('dynPaneSecurity');
+      if (!pane) return;
+      document.getElementById('securityBtn')?.click();
+      pane.innerHTML = '<p class="st-empty">Security controls opened.</p>';
+    }
+
+    function noteReaction(from, emoji) {
+      recentReactions.unshift({ from: from || 'Someone', emoji: emoji || '❤️', t: Date.now() });
+      if (recentReactions.length > 20) recentReactions.length = 20;
+      if (activePane === 'reactions') renderRecentReactions();
+    }
+    function renderRecentReactions() {
+      var el = document.getElementById('recentReactions');
+      if (!el) return;
+      if (!recentReactions.length) {
+        el.innerHTML = '<p class="st-empty">Recent reactions will appear here</p>';
+        return;
+      }
+      el.innerHTML = recentReactions.slice(0, 12).map(function (r) {
+        return '<div class="recent-reaction-item"><span>' + r.emoji + '</span><span>' + escapeHtml(r.from) + '</span></div>';
+      }).join('');
+    }
+    document.querySelectorAll('#dynEmojiBar .emoji-btn, #emojiBar .emoji-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var emoji = btn.getAttribute('data-emoji');
+        if (emoji && currentMeeting) noteReaction(currentMeeting.participantName || 'You', emoji);
+      });
+    });
+
+    function toWebpDataUrl(file, maxW, quality) {
+      return new Promise(function (resolve, reject) {
+        var img = new Image();
+        var url = URL.createObjectURL(file);
+        img.onload = function () {
+          var w = img.width, h = img.height;
+          var scale = Math.min(1, (maxW || 1280) / w);
+          var canvas = document.createElement('canvas');
+          canvas.width = Math.round(w * scale);
+          canvas.height = Math.round(h * scale);
+          var ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          URL.revokeObjectURL(url);
+          try { resolve(canvas.toDataURL('image/webp', quality || 0.82)); }
+          catch (e) { resolve(canvas.toDataURL('image/jpeg', quality || 0.82)); }
+        };
+        img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('Image load failed')); };
+        img.src = url;
+      });
+    }
+
+    function canEditTimeline() {
+      return !!(currentMeeting && (currentMeeting.isHost || myRole === 'host' || myRole === 'cohost' || myRole === 'participant'));
+    }
+
+    function renderTimelineSlots() {
+      ['stSlots', 'stSlotsDesktop'].forEach(function (id) {
+        var slots = document.getElementById(id);
+        if (!slots) return;
+        slots.innerHTML = '';
+        if (!screenTimeline.length) {
+          var empty = document.createElement('p');
+          empty.className = 'st-empty';
+          empty.textContent = 'No timeline images yet. Hosts can add up to 3.';
+          slots.appendChild(empty);
+          return;
+        }
+        screenTimeline.forEach(function (item, idx) {
+          var div = document.createElement('div');
+          div.className = 'st-slot' + (idx === slideshowIdx ? ' active' : '');
+          div.innerHTML = '<img src="' + item.dataUrl + '" alt="Timeline">' +
+            (canEditTimeline() ? '<button type="button" class="st-remove" data-id="' + item.id + '" title="Remove">&times;</button>' : '');
+          div.addEventListener('click', function (e) {
+            if (e.target.classList.contains('st-remove')) return;
+            showTimelineImage(idx);
+          });
+          slots.appendChild(div);
+        });
+        slots.querySelectorAll('.st-remove').forEach(function (btn) {
+          btn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            removeTimelineImage(btn.getAttribute('data-id'));
+          });
+        });
+      });
+    }
+
+    function showTimelineImage(idx) {
+      if (!screenTimeline[idx]) return;
+      slideshowIdx = idx;
+      var item = screenTimeline[idx];
+      var img = document.getElementById('contentImage');
+      var placeholder = document.getElementById('bigPlaceholder');
+      var contentView = document.getElementById('contentView');
+      var remoteVideo = document.getElementById('remoteVideo');
+      if (remoteVideo) remoteVideo.classList.add('hidden');
+      if (contentView) contentView.classList.remove('hidden');
+      if (img) { img.src = item.dataUrl; img.classList.remove('hidden'); }
+      if (placeholder) placeholder.classList.add('hidden');
+      ['contentFrame', 'pdfCanvasWrap', 'localMediaVideo'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) el.classList.add('hidden');
+      });
+      renderTimelineSlots();
+    }
+
+    function startSlideshow() {
+      stopSlideshow();
+      if (screenTimeline.length < 2) return;
+      slideshowTimer = setInterval(function () {
+        slideshowIdx = (slideshowIdx + 1) % screenTimeline.length;
+        showTimelineImage(slideshowIdx);
+      }, 5000);
+    }
+    function stopSlideshow() {
+      if (slideshowTimer) clearInterval(slideshowTimer);
+      slideshowTimer = null;
+    }
+
+    async function addTimelineImages(fileList) {
+      if (!canEditTimeline()) return;
+      var files = Array.from(fileList || []).filter(function (f) { return f.type.indexOf('image/') === 0; });
+      var room = 3 - screenTimeline.length;
+      if (room <= 0) { alert('Max 3 timeline images. Remove one to add another.'); return; }
+      files = files.slice(0, room);
+      for (var i = 0; i < files.length; i++) {
+        try {
+          var dataUrl = await toWebpDataUrl(files[i], 1280, 0.8);
+          var item = {
+            id: 'st-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+            dataUrl: dataUrl,
+            ownerId: currentMeeting.participantId,
+            ownerName: currentMeeting.participantName || 'Host'
+          };
+          screenTimeline.push(item);
+          try {
+            sendWS({ type: 'screen-timeline-add', item: { id: item.id, dataUrl: item.dataUrl, ownerId: item.ownerId, ownerName: item.ownerName } });
+          } catch (_) {}
+        } catch (e) { console.warn('timeline image failed', e); }
+      }
+      renderTimelineSlots();
+      if (screenTimeline.length) showTimelineImage(Math.max(0, screenTimeline.length - files.length));
+      if (slideshowOn) startSlideshow();
+    }
+
+    function removeTimelineImage(id) {
+      if (!canEditTimeline()) return;
+      screenTimeline = screenTimeline.filter(function (x) { return x.id !== id; });
+      try { sendWS({ type: 'screen-timeline-remove', id: id }); } catch (_) {}
+      if (slideshowIdx >= screenTimeline.length) slideshowIdx = Math.max(0, screenTimeline.length - 1);
+      renderTimelineSlots();
+      if (screenTimeline.length) showTimelineImage(slideshowIdx);
+      else {
+        var img = document.getElementById('contentImage');
+        if (img) { img.removeAttribute('src'); img.classList.add('hidden'); }
+        document.getElementById('bigPlaceholder')?.classList.remove('hidden');
+        document.getElementById('contentView')?.classList.add('hidden');
+        stopSlideshow();
+      }
+    }
+
+    function wireTimelineInputs() {
+      function bind(btnId, inputId) {
+        var btn = document.getElementById(btnId);
+        var input = document.getElementById(inputId);
+        if (!btn || !input) return;
+        btn.addEventListener('click', function () { input.click(); });
+        input.addEventListener('change', function () {
+          if (input.files && input.files.length) addTimelineImages(input.files);
+          input.value = '';
+        });
+      }
+      bind('stAddImagesBtn', 'stImageInput');
+      bind('stAddImagesBtnDesktop', 'stImageInputDesktop');
+      function bindToggle(id) {
+        var t = document.getElementById(id);
+        if (!t) return;
+        t.addEventListener('change', function () {
+          slideshowOn = !!t.checked;
+          document.querySelectorAll('#stSlideshowToggle, #stSlideshowToggleDesktop').forEach(function (x) {
+            if (x !== t) x.checked = slideshowOn;
+          });
+          if (slideshowOn) startSlideshow(); else stopSlideshow();
+          try { sendWS({ type: 'screen-timeline-slideshow', on: slideshowOn }); } catch (_) {}
+        });
+      }
+      bindToggle('stSlideshowToggle');
+      bindToggle('stSlideshowToggleDesktop');
+    }
+    wireTimelineInputs();
+
+    window.__initScreenTimeline = function () {
+      screenTimeline = [];
+      slideshowOn = false;
+      slideshowIdx = 0;
+      stopSlideshow();
+      renderTimelineSlots();
+      syncMobileChrome();
+    };
+    window.__resetScreenTimeline = function () {
+      screenTimeline = [];
+      stopSlideshow();
+      renderTimelineSlots();
+    };
+
+    function handleTimelineMsg(msg) {
+      if (!msg || !msg.type) return false;
+      if (msg.type === 'screen-timeline-add' && msg.item) {
+        if (!screenTimeline.some(function (x) { return x.id === msg.item.id; })) {
+          screenTimeline.push(msg.item);
+          if (screenTimeline.length > 3) screenTimeline = screenTimeline.slice(-3);
+          renderTimelineSlots();
+          if (screenTimeline.length === 1) showTimelineImage(0);
+        }
+        return true;
+      }
+      if (msg.type === 'screen-timeline-remove' && msg.id) {
+        screenTimeline = screenTimeline.filter(function (x) { return x.id !== msg.id; });
+        renderTimelineSlots();
+        return true;
+      }
+      if (msg.type === 'screen-timeline-state' && Array.isArray(msg.items)) {
+        screenTimeline = msg.items.slice(0, 3);
+        slideshowOn = !!msg.slideshow;
+        document.querySelectorAll('#stSlideshowToggle, #stSlideshowToggleDesktop').forEach(function (x) {
+          x.checked = slideshowOn;
+        });
+        renderTimelineSlots();
+        if (screenTimeline.length) showTimelineImage(0);
+        if (slideshowOn) startSlideshow();
+        return true;
+      }
+      if (msg.type === 'screen-timeline-slideshow') {
+        slideshowOn = !!msg.on;
+        document.querySelectorAll('#stSlideshowToggle, #stSlideshowToggleDesktop').forEach(function (x) {
+          x.checked = slideshowOn;
+        });
+        if (slideshowOn) startSlideshow(); else stopSlideshow();
+        return true;
+      }
+      if (msg.type === 'reaction') {
+        noteReaction(msg.fromName || msg.name || 'Someone', msg.emoji);
+      }
+      return false;
+    }
+
+    var wsMsgHookInstalled = false;
+    function installWsHook() {
+      if (wsMsgHookInstalled) return;
+      var tries = 0;
+      var iv = setInterval(function () {
+        tries++;
+        try {
+          if (typeof ws !== 'undefined' && ws && ws.onmessage) {
+            var prev = ws.onmessage;
+            ws.onmessage = function (ev) {
+              try {
+                var msg = typeof ev.data === 'string' ? JSON.parse(ev.data) : null;
+                if (msg) handleTimelineMsg(msg);
+              } catch (_) {}
+              return prev.call(this, ev);
+            };
+            wsMsgHookInstalled = true;
+            clearInterval(iv);
+          }
+        } catch (_) {}
+        if (tries > 60) clearInterval(iv);
+      }, 400);
+    }
+    installWsHook();
+
+    document.getElementById('chatSheetImageBtn')?.addEventListener('click', function () {
+      document.getElementById('chatImageBtn')?.click();
+    });
+    document.getElementById('chatSheetAttachBtn')?.addEventListener('click', function () {
+      document.getElementById('chatAttachBtn')?.click();
+    });
+    document.getElementById('chatSheetVoiceBtn')?.addEventListener('click', function () {
+      document.getElementById('chatVoiceBtn')?.click();
+    });
+
+    var cardsEl = document.getElementById('screenCards');
+    if (cardsEl && typeof MutationObserver !== 'undefined') {
+      new MutationObserver(function () {
+        if (activePane === 'screens') refreshDynScreens();
+      }).observe(cardsEl, { childList: true, subtree: true });
+    }
+
+    window.addEventListener('resize', function () {
+      if (currentMeeting) syncMobileChrome();
+    });
+  })();
+
 
 })();
