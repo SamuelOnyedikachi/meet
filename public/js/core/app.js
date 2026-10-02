@@ -6351,7 +6351,8 @@
             (canEditTimeline() ? '<button type="button" class="st-remove" data-id="' + item.id + '" title="Remove">&times;</button>' : '');
           div.addEventListener('click', function (e) {
             if (e.target.classList.contains('st-remove')) return;
-            showTimelineImage(idx);
+            var sync = isHostOrCohost() && !!slideshowOn;
+            showTimelineImage(idx, { silent: !sync, sync: sync });
           });
           slots.appendChild(div);
         });
@@ -6414,13 +6415,37 @@
       renderTimelineSlots();
       try { if (typeof renderCards === 'function') renderCards(); } catch (_) {}
       try { if (typeof window.__updateNavBadges === 'function') window.__updateNavBadges(); } catch (_) {}
-      // Debounced select broadcast — avoid storm when many images arrive
-      if (!opts.silent) {
+      // Sync to others ONLY when a host/cohost drives the show with slideshow ON.
+      // Everyone else's left/right is local-only (opts.silent or no broadcast).
+      var shouldSync = !opts.silent && !!opts.sync;
+      if (!shouldSync && !opts.silent) {
+        // Convenience: auto-sync if host/cohost and slideshow is running
+        try {
+          shouldSync = !!slideshowOn && (myRole === 'host' || myRole === 'cohost' ||
+            (currentMeeting && (currentMeeting.isHost || currentMeeting.role === 'host' || currentMeeting.role === 'cohost')));
+        } catch (_) { shouldSync = false; }
+      }
+      if (shouldSync) {
         if (_selectBroadcastTimer) clearTimeout(_selectBroadcastTimer);
         _selectBroadcastTimer = setTimeout(function () {
           try { sendWS({ type: 'screen-timeline-select', index: slideshowIdx }); } catch (_) {}
-        }, 120);
+        }, 80);
       }
+    }
+
+    function isHostOrCohost() {
+      try {
+        return myRole === 'host' || myRole === 'cohost' ||
+          !!(currentMeeting && (currentMeeting.isHost || currentMeeting.role === 'host' || currentMeeting.role === 'cohost'));
+      } catch (_) { return false; }
+    }
+
+    /** Navigate timeline. Local-only unless host/cohost with slideshow on. */
+    function navigateTimeline(delta) {
+      if (!screenTimeline.length) return;
+      var next = (slideshowIdx + delta + screenTimeline.length) % screenTimeline.length;
+      var sync = isHostOrCohost() && !!slideshowOn;
+      showTimelineImage(next, { silent: !sync, sync: sync });
     }
 
     function ensureTimelineNav() {
@@ -6437,13 +6462,11 @@
         big.appendChild(nav);
         nav.querySelector('.tn-prev').addEventListener('click', function (e) {
           e.stopPropagation();
-          if (!screenTimeline.length) return;
-          showTimelineImage((slideshowIdx - 1 + screenTimeline.length) % screenTimeline.length);
+          navigateTimeline(-1);
         });
         nav.querySelector('.tn-next').addEventListener('click', function (e) {
           e.stopPropagation();
-          if (!screenTimeline.length) return;
-          showTimelineImage((slideshowIdx + 1) % screenTimeline.length);
+          navigateTimeline(1);
         });
       }
       nav.style.display = screenTimeline.length > 1 ? 'flex' : 'none';
@@ -6460,8 +6483,8 @@
           if (!e.changedTouches || !e.changedTouches[0]) return;
           var dx = e.changedTouches[0].clientX - touchX;
           if (Math.abs(dx) < 40 || screenTimeline.length < 2) return;
-          if (dx < 0) showTimelineImage((slideshowIdx + 1) % screenTimeline.length);
-          else showTimelineImage((slideshowIdx - 1 + screenTimeline.length) % screenTimeline.length);
+          if (dx < 0) navigateTimeline(1);
+          else navigateTimeline(-1);
         }, { passive: true });
         img.addEventListener('dblclick', function (e) {
           e.preventDefault();
@@ -6471,33 +6494,53 @@
           img.style.transform = 'scale(' + z + ')';
           img.style.cursor = z > 1 ? 'zoom-out' : 'zoom-in';
         });
-        img.addEventListener('click', function (e) {
-          // single click zoom toggle lighter
-        });
-        document.addEventListener('keydown', function (e) {
-          if (!currentMeeting || !screenTimeline.length) return;
-          if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
-          if (e.key === 'ArrowLeft') {
-            e.preventDefault();
-            showTimelineImage((slideshowIdx - 1 + screenTimeline.length) % screenTimeline.length);
-          } else if (e.key === 'ArrowRight') {
-            e.preventDefault();
-            showTimelineImage((slideshowIdx + 1) % screenTimeline.length);
-          }
-        });
+        if (!window.__timelineKeysWired) {
+          window.__timelineKeysWired = true;
+          document.addEventListener('keydown', function (e) {
+            if (!currentMeeting || !screenTimeline.length) return;
+            if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable)) return;
+            // Space: pause slideshow (host/cohost turns it off for everyone)
+            if (e.code === 'Space' || e.key === ' ') {
+              if (slideshowOn) {
+                e.preventDefault();
+                slideshowOn = false;
+                stopSlideshow();
+                document.querySelectorAll('#stSlideshowToggle, #stSlideshowToggleDesktop, #stSlideshowToggleSide').forEach(function (x) {
+                  x.checked = false;
+                });
+                if (isHostOrCohost()) {
+                  try { sendWS({ type: 'screen-timeline-slideshow', on: false }); } catch (_) {}
+                }
+                if (typeof showToast === 'function') showToast('Slideshow paused');
+              }
+              return;
+            }
+            if (e.key === 'ArrowLeft') {
+              e.preventDefault();
+              navigateTimeline(-1);
+            } else if (e.key === 'ArrowRight') {
+              e.preventDefault();
+              navigateTimeline(1);
+            }
+          });
+        }
       }
     }
 
     function startSlideshow() {
       stopSlideshow();
       if (!slideshowOn || screenTimeline.length < 2) return;
+      // Only host/cohost runs the "driver" timer that syncs everyone.
+      // Participants follow via screen-timeline-select; if they somehow have slideshowOn
+      // without being host, advance locally without broadcasting.
       slideshowTimer = setInterval(function () {
         if (!slideshowOn || screenTimeline.length < 2) {
           stopSlideshow();
           return;
         }
         var next = (slideshowIdx + 1) % screenTimeline.length;
-        showTimelineImage(next, { silent: true });
+        var sync = isHostOrCohost();
+        showTimelineImage(next, { silent: !sync, sync: sync });
       }, 5000);
     }
     function stopSlideshow() {
@@ -6598,8 +6641,19 @@
           document.querySelectorAll('#stSlideshowToggle, #stSlideshowToggleDesktop, #stSlideshowToggleSide').forEach(function (x) {
             if (x !== t) x.checked = slideshowOn;
           });
-          if (slideshowOn) startSlideshow(); else stopSlideshow();
-          try { sendWS({ type: 'screen-timeline-slideshow', on: slideshowOn }); } catch (_) {}
+          if (slideshowOn) {
+            startSlideshow();
+            // Align everyone to current slide when host starts the show
+            if (isHostOrCohost()) {
+              try { sendWS({ type: 'screen-timeline-slideshow', on: true }); } catch (_) {}
+              try { sendWS({ type: 'screen-timeline-select', index: slideshowIdx }); } catch (_) {}
+            } else {
+              try { sendWS({ type: 'screen-timeline-slideshow', on: true }); } catch (_) {}
+            }
+          } else {
+            stopSlideshow();
+            try { sendWS({ type: 'screen-timeline-slideshow', on: false }); } catch (_) {}
+          }
         });
       }
       bindToggle('stSlideshowToggle');

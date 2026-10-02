@@ -85,10 +85,13 @@ module.exports = {
 
     ctx.onWs('screen-timeline-select', ({ msg, participantId, meeting, meetingCode }) => {
       const st = ensure(meeting);
-      if (typeof msg.index === 'number' && msg.index >= 0 && msg.index < st.items.length) {
-        st.selected = msg.index;
-        broadcast(meetingCode, { type: 'screen-timeline-select', index: st.selected }, participantId);
-      }
+      if (typeof msg.index !== 'number' || msg.index < 0 || msg.index >= st.items.length) return;
+      // Only host/cohost may drive a shared selection, and only while slideshow is on
+      const p = meeting.participants.get(participantId);
+      const hostLike = p && (p.isHost || p.role === 'host' || p.role === 'cohost');
+      if (!hostLike || !st.slideshow) return;
+      st.selected = msg.index;
+      broadcast(meetingCode, { type: 'screen-timeline-select', index: st.selected }, participantId);
     });
 
     ctx.onWs('screen-timeline-request', ({ meeting, ws }) => {
