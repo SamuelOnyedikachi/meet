@@ -1067,7 +1067,13 @@
       await room.connect(url, tokenData.token, { autoSubscribe: true });
       console.log('[LiveKit] connect OK, state=', room.state);
       micOn = false;
+      try {
+        if (room?.localParticipant) {
+          await room.localParticipant.setMicrophoneEnabled(false);
+        }
+      } catch (_) {}
       updateMicButton();
+      try { if (typeof window.__syncMobileChrome === 'function') window.__syncMobileChrome(); } catch (_) {}
       // Pick up any screen shares already published before we joined
       attachExistingRemoteScreenTracks();
       syncSharingFlagsFromLiveKit();
@@ -1359,6 +1365,12 @@
       remoteVideo.srcObject = null;
       remoteVideo.classList.remove('active');
     }
+    // Prefer screen-timeline image fallback instead of black / empty stage
+    if (typeof window.__showSelectedTimelineImage === 'function' && window.__hasTimelineImages?.()) {
+      window.__showSelectedTimelineImage();
+      renderCards();
+      return;
+    }
     bigPlaceholder?.classList.remove('hidden');
     if (bigViewLabel) {
       bigViewLabel.textContent = '';
@@ -1369,6 +1381,10 @@
       const p = bigPlaceholder.querySelector('p');
       if (p) p.textContent = 'No screen selected';
     }
+    const contentView = document.getElementById('contentView');
+    if (contentView) contentView.classList.add('hidden');
+    const contentImage = document.getElementById('contentImage');
+    if (contentImage) { contentImage.removeAttribute('src'); contentImage.classList.add('hidden'); }
     renderCards();
   }
 
@@ -1925,7 +1941,11 @@
       (p) => p.sharing || (p.id === currentMeeting?.participantId && isSharing)
     );
 
-    if (!sharingList.length) {
+    // Virtual timeline "screens" — if someone uploaded images, others can pick them
+    const timelineState = (typeof window.__getTimelineState === 'function') ? window.__getTimelineState() : null;
+    const hasTimeline = timelineState && timelineState.items && timelineState.items.length;
+
+    if (!sharingList.length && !hasTimeline) {
       screenCards.classList.add('empty');
       return;
     }
@@ -1950,6 +1970,37 @@
     const row = document.createElement('div');
     row.className = 'screen-cards-row';
     pinned.forEach((p) => row.appendChild(makeCard(p)));
+    // Timeline cards (one card per uploader group — show as selectable stills)
+    if (hasTimeline) {
+      const owners = {};
+      timelineState.items.forEach((it, idx) => {
+        const key = it.ownerId || 'timeline';
+        if (!owners[key]) owners[key] = { name: it.ownerName || 'Timeline', items: [], firstIdx: idx };
+        owners[key].items.push(it);
+      });
+      Object.keys(owners).forEach((key) => {
+        const o = owners[key];
+        const card = document.createElement('div');
+        card.className = 'screen-card timeline-card sharing';
+        const thumb = o.items[0]?.dataUrl;
+        card.innerHTML = (thumb ? '<img class="card-thumb" src="' + thumb + '" alt="">' : '<i class="fa-solid fa-images card-icon"></i>') +
+          '<span class="card-name">' + escapeHtml(o.name) + ' · images</span>';
+        card.addEventListener('click', () => {
+          if (typeof window.__showSelectedTimelineImage === 'function') {
+            // show primarily selected or first
+            const st = window.__getTimelineState();
+            const idx = (st && st.selected != null) ? st.selected : o.firstIdx;
+            // force show via internal API
+            try {
+              const slots = document.querySelectorAll('#stSlots .st-slot, #stSlotsDesktop .st-slot');
+              if (slots[idx]) slots[idx].click();
+              else window.__showSelectedTimelineImage();
+            } catch (_) { window.__showSelectedTimelineImage(); }
+          }
+        });
+        row.appendChild(card);
+      });
+    }
     screenCards.appendChild(row);
 
     if (rest.length) {
@@ -2071,6 +2122,7 @@
       }
       if (typeof window.__syncMobileChrome === 'function') window.__syncMobileChrome();
       if (typeof window.__initScreenTimeline === 'function') window.__initScreenTimeline();
+      try { if (typeof syncMoreMenuInCall === 'function') syncMoreMenuInCall(); } catch (_) {}
     } catch (_) {}
 
     renderParticipants();
@@ -5106,6 +5158,9 @@
       document.querySelectorAll('.mfn-btn[data-pane]').forEach(function (b) {
         b.classList.toggle('active', b.getAttribute('data-pane') === activePane);
       });
+      if (activePane !== 'security') {
+        try { restoreSecurityBody(); } catch (_) {}
+      }
       if (activePane === 'screens') refreshDynScreens();
       if (activePane === 'chat') fillDynChat();
       if (activePane === 'people') fillDynPeople();
@@ -5123,7 +5178,7 @@
       });
     }
 
-    document.getElementById('dynamicPanelClose')?.addEventListener('click', closeDynamicPane);
+    // close X removed — panel stays as content surface
 
     function syncMobileChrome() {
       var name = document.getElementById('mobileMeetName');
@@ -5144,10 +5199,13 @@
       if (mfnSec && sec) {
         mfnSec.classList.toggle('hidden', sec.classList.contains('hidden'));
       }
-      var canEdit = !!(currentMeeting && (currentMeeting.isHost || myRole === 'host' || myRole === 'cohost' || myRole === 'participant'));
+      var canEdit = canEditTimeline();
       ['stActions', 'stActionsDesktop'].forEach(function (id) {
         var el = document.getElementById(id);
-        if (el) el.classList.toggle('hidden', !canEdit);
+        if (el) {
+          el.classList.toggle('hidden', !canEdit);
+          el.classList.add('host-cohost-only');
+        }
       });
       if (isMobileLayout()) {
         var panel = document.getElementById('dynamicPanel');
@@ -5228,7 +5286,13 @@
           list.appendChild(clone);
         });
       }
+      // Also ensure timeline slots + host-only add controls
       renderTimelineSlots();
+      var canEdit = canEditTimeline();
+      ['stActions', 'stActionsDesktop'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) el.classList.toggle('hidden', !canEdit);
+      });
     }
 
     function fillDynChat() {
@@ -5250,6 +5314,7 @@
         '</div>' +
         '<div class="chat-form-row chat-form-row-tools">' +
         '<button type="button" class="btn icon-btn" id="dynChatImageBtn" title="Send image"><i class="fa-regular fa-image"></i></button>' +
+        '<button type="button" class="btn icon-btn" id="dynChatAttachBtn" title="Attach file"><i class="fa-solid fa-paperclip"></i></button>' +
         '<button type="button" class="btn icon-btn" id="dynChatVoiceBtn" title="Voice note"><i class="fa-solid fa-microphone"></i></button>' +
         '</div>';
       pane.appendChild(form);
@@ -5271,6 +5336,9 @@
       document.getElementById('dynChatImageBtn')?.addEventListener('click', function () {
         document.getElementById('chatImageBtn')?.click();
       });
+      document.getElementById('dynChatAttachBtn')?.addEventListener('click', function () {
+        document.getElementById('chatAttachBtn')?.click();
+      });
       document.getElementById('dynChatVoiceBtn')?.addEventListener('click', function () {
         document.getElementById('chatVoiceBtn')?.click();
       });
@@ -5290,44 +5358,118 @@
     function fillDynMore() {
       var pane = document.getElementById('dynPaneMore');
       if (!pane) return;
-      var more = document.getElementById('meetingMorePanel');
       pane.innerHTML = '';
+      // 1) Topbar moreMenu items (copy code, share, theme, history, leave, etc.)
+      var topMore = document.getElementById('moreMenu');
+      if (topMore) {
+        try { if (typeof syncMoreMenuInCall === 'function') syncMoreMenuInCall(); } catch (_) {}
+        var section = document.createElement('div');
+        section.className = 'dyn-more-section';
+        topMore.querySelectorAll('.more-item').forEach(function (btn) {
+          if (btn.classList.contains('hidden')) return;
+          var b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'more-item';
+          b.innerHTML = btn.innerHTML;
+          var act = btn.getAttribute('data-action');
+          b.setAttribute('data-action', act || '');
+          b.addEventListener('click', function () {
+            // Trigger original handler path
+            btn.click();
+          });
+          section.appendChild(b);
+        });
+        pane.appendChild(section);
+      }
+      // 2) Meeting controls more panel (reactions, quality, connection, activity, record, invite)
+      var more = document.getElementById('meetingMorePanel');
       if (more) {
+        var sep = document.createElement('div');
+        sep.className = 'more-sep';
+        pane.appendChild(sep);
         var clone = more.cloneNode(true);
         clone.classList.remove('hidden');
+        clone.id = '';
         clone.style.position = 'static';
         clone.style.boxShadow = 'none';
         clone.style.border = 'none';
+        clone.style.display = 'block';
         clone.querySelectorAll('[id]').forEach(function (el) { el.removeAttribute('id'); });
-        pane.appendChild(clone);
-        var histBtn = document.createElement('button');
-        histBtn.type = 'button';
-        histBtn.className = 'more-item';
-        histBtn.innerHTML = '<i class="fa-solid fa-clock-rotate-left"></i> History';
-        histBtn.addEventListener('click', function () { showHistory(); });
-        pane.appendChild(histBtn);
-        pane.querySelectorAll('.emoji-btn').forEach(function (btn) {
+        // Wire selects to originals by syncing values
+        var origSend = document.getElementById('sendQualitySelect');
+        var origView = document.getElementById('viewQualitySelect');
+        clone.querySelectorAll('select').forEach(function (sel, i) {
+          sel.addEventListener('change', function () {
+            var target = i === 0 ? origSend : origView;
+            if (target) { target.value = sel.value; target.dispatchEvent(new Event('change', { bubbles: true })); }
+          });
+        });
+        clone.querySelectorAll('.emoji-btn').forEach(function (btn) {
           btn.addEventListener('click', function () {
             var emoji = btn.getAttribute('data-emoji');
             if (emoji) try { sendWS({ type: 'reaction', emoji: emoji }); } catch (_) {}
           });
         });
-        pane.querySelectorAll('.more-item').forEach(function (btn) {
-          if (btn === histBtn) return;
+        clone.querySelectorAll('.more-item').forEach(function (btn) {
           var act = btn.getAttribute('data-act');
           btn.addEventListener('click', function () {
             var orig = document.querySelector('#meetingMorePanel .more-item[data-act="' + act + '"]');
             if (orig) orig.click();
+            else if (act === 'connection') document.getElementById('moreConnectionBtn')?.click();
+            else if (act === 'activity') document.getElementById('moreActivityBtn')?.click();
+            else if (act === 'record') document.getElementById('moreRecordBtn')?.click();
+            else if (act === 'invite') document.getElementById('moreInviteBtn')?.click();
+            else if (act === 'fullscreen') document.getElementById('moreFullscreenBtn')?.click();
           });
         });
+        pane.appendChild(clone);
       }
+    }
+
+    function fillDynLine1More() {
+      // Alias: line1 3dots uses same rich more content
+      fillDynMore();
     }
 
     function fillDynSecurity() {
       var pane = document.getElementById('dynPaneSecurity');
       if (!pane) return;
-      document.getElementById('securityBtn')?.click();
-      pane.innerHTML = '<p class="st-empty">Security controls opened.</p>';
+      document.body.classList.add('sec-in-panel');
+      pane.innerHTML = '';
+      var drawerBody = document.querySelector('#securityDrawer .drawer-body');
+      if (!drawerBody) {
+        pane.innerHTML = '<p class="st-empty">Security controls unavailable.</p>';
+        return;
+      }
+      // Move live controls into panel (keep same IDs so existing JS still works)
+      var wrap = document.createElement('div');
+      wrap.className = 'dyn-security-wrap';
+      // Clone structure but keep working by re-parenting the real body temporarily
+      var host = document.createElement('div');
+      host.className = 'security-panel dyn-sec-panel';
+      // Use the real drawer body in-place via adopt
+      var placeholder = document.createElement('div');
+      placeholder.id = 'secBodyPlaceholder';
+      placeholder.style.display = 'none';
+      if (!drawerBody.dataset.dynMoved) {
+        drawerBody.parentNode.insertBefore(placeholder, drawerBody);
+        host.appendChild(drawerBody);
+        drawerBody.dataset.dynMoved = '1';
+      } else {
+        host.appendChild(drawerBody);
+      }
+      pane.appendChild(host);
+    }
+
+    function restoreSecurityBody() {
+      var body = document.querySelector('.dyn-sec-panel .drawer-body, #dynPaneSecurity .drawer-body');
+      var ph = document.getElementById('secBodyPlaceholder');
+      if (body && ph && ph.parentNode) {
+        ph.parentNode.insertBefore(body, ph);
+        ph.remove();
+        body.dataset.dynMoved = '';
+      }
+      document.body.classList.remove('sec-in-panel');
     }
 
     function noteReaction(from, emoji) {
@@ -5375,7 +5517,8 @@
     }
 
     function canEditTimeline() {
-      return !!(currentMeeting && (currentMeeting.isHost || myRole === 'host' || myRole === 'cohost' || myRole === 'participant'));
+      // Guests and regular participants cannot add images unless host/cohost
+      return !!(currentMeeting && (currentMeeting.isHost || myRole === 'host' || myRole === 'cohost'));
     }
 
     function renderTimelineSlots() {
@@ -5418,7 +5561,13 @@
       var placeholder = document.getElementById('bigPlaceholder');
       var contentView = document.getElementById('contentView');
       var remoteVideo = document.getElementById('remoteVideo');
-      if (remoteVideo) remoteVideo.classList.add('hidden');
+      var lkVid = document.getElementById('lkScreenVideo');
+      // Hide live video when viewing timeline still
+      if (remoteVideo) {
+        remoteVideo.classList.add('hidden');
+        remoteVideo.style.display = 'none';
+      }
+      if (lkVid) lkVid.style.display = 'none';
       if (contentView) contentView.classList.remove('hidden');
       if (img) { img.src = item.dataUrl; img.classList.remove('hidden'); }
       if (placeholder) placeholder.classList.add('hidden');
@@ -5426,7 +5575,15 @@
         var el = document.getElementById(id);
         if (el) el.classList.add('hidden');
       });
+      var label = document.getElementById('bigViewLabel');
+      if (label) {
+        label.textContent = (item.ownerName || 'Timeline') + ' · image';
+        label.classList.add('visible');
+      }
       renderTimelineSlots();
+      // Refresh screen cards so timeline appears as a selectable "screen"
+      try { if (typeof renderCards === 'function') renderCards(); } catch (_) {}
+      try { sendWS({ type: 'screen-timeline-select', index: slideshowIdx }); } catch (_) {}
     }
 
     function startSlideshow() {
@@ -5527,6 +5684,15 @@
       stopSlideshow();
       renderTimelineSlots();
     };
+    window.__hasTimelineImages = function () { return screenTimeline.length > 0; };
+    window.__showSelectedTimelineImage = function () {
+      if (!screenTimeline.length) return false;
+      showTimelineImage(slideshowIdx);
+      return true;
+    };
+    window.__getTimelineState = function () {
+      return { items: screenTimeline.slice(), selected: slideshowIdx, slideshow: slideshowOn };
+    };
 
     function handleTimelineMsg(msg) {
       if (!msg || !msg.type) return false;
@@ -5547,12 +5713,16 @@
       if (msg.type === 'screen-timeline-state' && Array.isArray(msg.items)) {
         screenTimeline = msg.items.slice(0, 3);
         slideshowOn = !!msg.slideshow;
+        if (typeof msg.selected === 'number') slideshowIdx = msg.selected;
         document.querySelectorAll('#stSlideshowToggle, #stSlideshowToggleDesktop').forEach(function (x) {
           x.checked = slideshowOn;
         });
         renderTimelineSlots();
-        if (screenTimeline.length) showTimelineImage(0);
+        if (screenTimeline.length) {
+          showTimelineImage(Math.min(slideshowIdx, screenTimeline.length - 1));
+        }
         if (slideshowOn) startSlideshow();
+        try { if (typeof renderCards === 'function') renderCards(); } catch (_) {}
         return true;
       }
       if (msg.type === 'screen-timeline-slideshow') {
@@ -5561,6 +5731,22 @@
           x.checked = slideshowOn;
         });
         if (slideshowOn) startSlideshow(); else stopSlideshow();
+        return true;
+      }
+      if (msg.type === 'screen-timeline-select' && typeof msg.index === 'number') {
+        if (screenTimeline[msg.index]) {
+          slideshowIdx = msg.index;
+          // Only auto-show if not currently watching a live share
+          var someoneSharing = false;
+          try {
+            someoneSharing = (typeof participants !== 'undefined') && participants.some(function (p) { return p.sharing; });
+          } catch (_) {}
+          if (!someoneSharing && !(typeof isSharing !== 'undefined' && isSharing)) {
+            showTimelineImage(msg.index);
+          } else {
+            renderTimelineSlots();
+          }
+        }
         return true;
       }
       if (msg.type === 'reaction') {

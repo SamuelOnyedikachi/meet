@@ -1,12 +1,12 @@
-/** Screen timeline: up to 3 host/cohost images shown as active screens + optional slideshow */
+/** Screen timeline: up to 3 host/cohost images; acts as fallback "screen" for viewers */
 module.exports = {
   id: 'screenTimeline',
   register(ctx) {
-    const { broadcast, clients } = ctx;
+    const { broadcast } = ctx;
 
     function ensure(meeting) {
       if (!meeting.screenTimeline) {
-        meeting.screenTimeline = { items: [], slideshow: false };
+        meeting.screenTimeline = { items: [], slideshow: false, selected: 0 };
       }
       return meeting.screenTimeline;
     }
@@ -14,7 +14,8 @@ module.exports = {
     function canEdit(meeting, participantId) {
       const p = meeting.participants.get(participantId);
       if (!p) return false;
-      return !!(p.isHost || p.role === 'host' || p.role === 'cohost' || p.role === 'participant');
+      // Host or cohost only — guests/participants cannot upload unless promoted
+      return !!(p.isHost || p.role === 'host' || p.role === 'cohost');
     }
 
     ctx.onWs('screen-timeline-add', ({ msg, participantId, meeting, meetingCode }) => {
@@ -29,7 +30,14 @@ module.exports = {
         ownerName: String(msg.item.ownerName || meeting.participants.get(participantId)?.name || 'Host').slice(0, 64),
       };
       st.items.push(item);
+      if (st.items.length === 1) st.selected = 0;
       broadcast(meetingCode, { type: 'screen-timeline-add', item });
+      broadcast(meetingCode, {
+        type: 'screen-timeline-state',
+        items: st.items,
+        slideshow: st.slideshow,
+        selected: st.selected,
+      });
     });
 
     ctx.onWs('screen-timeline-remove', ({ msg, participantId, meeting, meetingCode }) => {
@@ -37,7 +45,14 @@ module.exports = {
       const st = ensure(meeting);
       const id = msg.id;
       st.items = st.items.filter((x) => x.id !== id);
+      if (st.selected >= st.items.length) st.selected = Math.max(0, st.items.length - 1);
       broadcast(meetingCode, { type: 'screen-timeline-remove', id });
+      broadcast(meetingCode, {
+        type: 'screen-timeline-state',
+        items: st.items,
+        slideshow: st.slideshow,
+        selected: st.selected,
+      });
     });
 
     ctx.onWs('screen-timeline-slideshow', ({ msg, participantId, meeting, meetingCode }) => {
@@ -45,6 +60,14 @@ module.exports = {
       const st = ensure(meeting);
       st.slideshow = !!msg.on;
       broadcast(meetingCode, { type: 'screen-timeline-slideshow', on: st.slideshow });
+    });
+
+    ctx.onWs('screen-timeline-select', ({ msg, participantId, meeting, meetingCode }) => {
+      const st = ensure(meeting);
+      if (typeof msg.index === 'number' && msg.index >= 0 && msg.index < st.items.length) {
+        st.selected = msg.index;
+        broadcast(meetingCode, { type: 'screen-timeline-select', index: st.selected }, participantId);
+      }
     });
 
     ctx.onRegister((ws, meeting) => {
@@ -55,6 +78,7 @@ module.exports = {
           type: 'screen-timeline-state',
           items: st.items,
           slideshow: st.slideshow,
+          selected: st.selected || 0,
         }));
       } catch (_) {}
     });

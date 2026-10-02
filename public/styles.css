@@ -4965,3 +4965,68 @@ body.dark .notifications-list li { background: rgba(255,255,255,.04); }
 #desktopScreenTimeline { display: none; }
 
 .host-only.hidden { display: none !important; }
+
+/* ---- 2026-10-02 mobile panel refinements ---- */
+.dynamic-panel-title {
+  margin: 0 0 0.65rem;
+  padding: 0.15rem 0;
+  font-size: 0.95rem;
+  font-weight: 650;
+  /* scrolls with content — not sticky/fixed */
+  position: static;
+}
+.dynamic-panel-header { display: none !important; } /* X removed; title lives in body */
+
+.dynamic-panel-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* Chat pane: messages flex, form pinned near bottom with breathing room */
+#dynPaneChat {
+  display: flex;
+  flex-direction: column;
+  min-height: min(48vh, 420px);
+  flex: 1;
+}
+#dynPaneChat .chat-messages,
+#dynChatMessages {
+  flex: 1 1 auto;
+  min-height: 8rem;
+  max-height: none;
+  overflow-y: auto;
+  padding-bottom: 0.75rem;
+}
+#dynPaneChat .chat-form {
+  margin-top: auto;
+  flex-shrink: 0;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.chat-sheet-body {
+  min-height: min(55vh, 480px);
+}
+.chat-sheet-body .chat-messages {
+  min-height: 8rem !important;
+  flex: 1 1 auto;
+}
+.chat-sheet-body .chat-form {
+  margin-top: auto;
+}
+
+/* When security is shown in dynamic panel, suppress the external drawer on mobile */
+body.in-meeting-mobile.sec-in-panel #securityDrawer {
+  display: none !important;
+}
+
+/* Timeline add actions: host/cohost only (JS toggles .host-cohost-only) */
+.host-cohost-only.hidden { display: none !important; }
+
+/* Virtual timeline screen cards */
+.screen-card.timeline-card .card-icon { color: var(--primary); }
+.screen-card.timeline-card img.card-thumb {
+  width: 28px; height: 20px; object-fit: cover; border-radius: 4px;
+  margin-right: 4px;
+}

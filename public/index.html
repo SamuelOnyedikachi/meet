@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link rel="stylesheet" href="styles.css?v=20261002mobileFirst">
+  <link rel="stylesheet" href="styles.css?v=20261002mobileFirstB">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤝</text></svg>">
 </head>
 <body>
@@ -455,7 +455,7 @@
               <div class="st-slots" id="stSlotsDesktop">
                 <p class="st-empty" id="stEmptyDesktop">No timeline images. Hosts can add up to 3.</p>
               </div>
-              <div class="st-actions host-only hidden" id="stActionsDesktop">
+              <div class="st-actions host-cohost-only hidden" id="stActionsDesktop">
                 <button type="button" class="btn small-btn primary-btn" id="stAddImagesBtnDesktop"><i class="fa-solid fa-plus"></i> Add images</button>
                 <input type="file" id="stImageInputDesktop" accept="image/*" multiple hidden>
               </div>
@@ -533,11 +533,8 @@
 
             <!-- Dynamic panel: mobile/tablet secondary surface for screens, chat, people, more, reactions, security -->
             <div class="dynamic-panel" id="dynamicPanel" aria-live="polite">
-              <div class="dynamic-panel-header">
-                <h3 id="dynamicPanelTitle">Screens</h3>
-                <button type="button" id="dynamicPanelClose" class="btn icon-btn" title="Close panel" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
-              </div>
               <div class="dynamic-panel-body" id="dynamicPanelBody">
+                <h3 class="dynamic-panel-title" id="dynamicPanelTitle">Screens</h3>
                 <div class="dyn-pane" data-pane="screens" id="dynPaneScreens">
                   <div class="screen-timeline" id="screenTimeline">
                     <div class="st-header">
@@ -550,7 +547,7 @@
                     <div class="st-slots" id="stSlots">
                       <p class="st-empty" id="stEmpty">No timeline images yet. Hosts can add up to 3 images.</p>
                     </div>
-                    <div class="st-actions host-only hidden" id="stActions">
+                    <div class="st-actions host-cohost-only hidden" id="stActions">
                       <button type="button" class="btn small-btn primary-btn" id="stAddImagesBtn"><i class="fa-solid fa-plus"></i> Add images</button>
                       <input type="file" id="stImageInput" accept="image/*" multiple hidden>
                     </div>
@@ -1062,6 +1059,6 @@
   <script src="js/features/mute.js?v=20260924secMob1"></script>
   <script src="js/features/device-icons.js?v=20260924secMob1"></script>
   <script src="js/main.js?v=20260924secMob1"></script>
-  <script src="js/core/app.js?v=20261002mobileFirst"></script>
+  <script src="js/core/app.js?v=20261002mobileFirstB"></script>
 </body>
 </html>
