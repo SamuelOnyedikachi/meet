@@ -695,6 +695,7 @@
               currentMeeting.role = 'host';
             }
             ensureModPermissions(me.permissions || null);
+            try { if (typeof window.__syncMobileChrome === 'function') window.__syncMobileChrome(); } catch (_) {}
           } else {
             ensureModPermissions();
           }
@@ -771,6 +772,7 @@
                 currentMeeting.isHost = true;
               }
               ensureModPermissions(me.permissions || null);
+            try { if (typeof window.__syncMobileChrome === 'function') window.__syncMobileChrome(); } catch (_) {}
             } else {
               ensureModPermissions();
             }
@@ -826,6 +828,10 @@
         }
         try { updateShareButton(); } catch (_) {}
         try { if (typeof window.__syncMobileChrome === 'function') window.__syncMobileChrome(); } catch (_) {}
+        // Refresh timeline add controls if screenTimeline permission changed
+        try {
+          if (typeof window.__syncMobileChrome === 'function') window.__syncMobileChrome();
+        } catch (_) {}
         // If screen share revoked while sharing, stop locally
         if (isSharing && myPermissions && myPermissions.screenShare === false &&
             myRole !== 'host' && myRole !== 'cohost') {
@@ -1743,7 +1749,7 @@
   let removeTargetId = null;
 
   const HOST_PERMISSIONS = {
-    microphone: true, camera: true, screenShare: true, chat: true, reactions: true, raiseHand: true,
+    microphone: true, camera: true, screenShare: true, screenTimeline: true, chat: true, reactions: true, raiseHand: true,
     invite: true, muteOthers: true, removePeople: true, manageWaiting: true, manageRoles: true,
     manageSecurity: true, lockMeeting: true, endMeeting: true, transferHost: true, lowerHands: true, askUnmute: true,
   };
@@ -1765,7 +1771,7 @@
     } else if (myRole === 'cohost') {
       myPermissions = Object.assign({
         muteOthers: true, removePeople: true, manageWaiting: true, lowerHands: true, askUnmute: true,
-        screenShare: true, chat: true, raiseHand: true, microphone: true,
+        screenShare: true, screenTimeline: true, chat: true, raiseHand: true, microphone: true,
       }, myPermissions || {});
     }
     return myPermissions;
@@ -5600,6 +5606,7 @@
       var list = document.getElementById('dynScreensList');
       if (!list) return;
       list.innerHTML = '';
+      // Live screen shares
       var src = document.getElementById('screenCards');
       if (src) {
         src.querySelectorAll('.screen-card').forEach(function (c) {
@@ -5608,13 +5615,34 @@
           list.appendChild(clone);
         });
       }
-      // Also ensure timeline slots + host-only add controls
+      // Always surface timeline images as selectable "screen" cards for everyone
+      if (screenTimeline.length) {
+        var owners = {};
+        screenTimeline.forEach(function (it, idx) {
+          var key = it.ownerId || 'timeline';
+          if (!owners[key]) owners[key] = { name: it.ownerName || 'Timeline', firstIdx: idx, thumb: it.dataUrl };
+        });
+        Object.keys(owners).forEach(function (key) {
+          // skip if already cloned a matching timeline-card from desktop
+          var already = list.querySelector('.timeline-card');
+          var o = owners[key];
+          var card = document.createElement('div');
+          card.className = 'screen-card timeline-card sharing';
+          card.innerHTML = (o.thumb ? '<img class="card-thumb" src="' + o.thumb + '" alt="">' : '<i class="fa-solid fa-images card-icon"></i>') +
+            '<span class="card-name">' + escapeHtml(o.name) + ' · images</span>';
+          card.addEventListener('click', function () {
+            showTimelineImage(o.firstIdx);
+          });
+          list.appendChild(card);
+        });
+      }
       renderTimelineSlots();
       var canEdit = canEditTimeline();
       ['stActions', 'stActionsDesktop', 'stActionsSide'].forEach(function (id) {
         var el = document.getElementById(id);
         if (el) el.classList.toggle('hidden', !canEdit);
       });
+      try { if (typeof window.__updateNavBadges === 'function') window.__updateNavBadges(); } catch (_) {}
     }
 
     function fillDynChat() {
@@ -6244,9 +6272,18 @@
     function canEditTimeline() {
       if (!currentMeeting) return false;
       if (currentMeeting.isHost || myRole === 'host' || myRole === 'cohost') return true;
-      // Participants/guests only if host/cohost enabled screenTimeline for them
       try {
-        if (myPermissions && myPermissions.screenTimeline) return true;
+        if (myPermissions && myPermissions.screenTimeline === true) return true;
+      } catch (_) {}
+      // Roster may carry resolved permissions after reload
+      try {
+        var me = (participants || []).find(function (p) {
+          return currentMeeting && p.id === currentMeeting.participantId;
+        });
+        if (me && me.permissions && me.permissions.screenTimeline === true) {
+          myPermissions = Object.assign({}, myPermissions || {}, me.permissions);
+          return true;
+        }
       } catch (_) {}
       return false;
     }
@@ -6423,6 +6460,8 @@
         } catch (e) { console.warn('timeline image failed', e); }
       }
       renderTimelineSlots();
+      try { if (typeof renderCards === 'function') renderCards(); } catch (_) {}
+      refreshDynScreens();
       if (screenTimeline.length) showTimelineImage(Math.max(0, screenTimeline.length - files.length));
       if (slideshowOn) startSlideshow();
     }
@@ -6505,7 +6544,12 @@
           screenTimeline.push(msg.item);
           if (screenTimeline.length > 10) screenTimeline = screenTimeline.slice(-10);
           renderTimelineSlots();
-          if (screenTimeline.length === 1) showTimelineImage(0);
+          try { if (typeof renderCards === 'function') renderCards(); } catch (_) {}
+          refreshDynScreens();
+          // Auto-show for viewers when first image arrives or when not watching live share
+          var liveShare = false;
+          try { liveShare = (participants || []).some(function (p) { return p.sharing; }) || !!isSharing; } catch (_) {}
+          if (!liveShare) showTimelineImage(screenTimeline.length - 1);
         }
         return true;
       }
@@ -6518,15 +6562,16 @@
         screenTimeline = msg.items.slice(0, 10);
         slideshowOn = !!msg.slideshow;
         if (typeof msg.selected === 'number') slideshowIdx = msg.selected;
-        document.querySelectorAll('#stSlideshowToggle, #stSlideshowToggleDesktop').forEach(function (x) {
+        document.querySelectorAll('#stSlideshowToggle, #stSlideshowToggleDesktop, #stSlideshowToggleSide').forEach(function (x) {
           x.checked = slideshowOn;
         });
         renderTimelineSlots();
+        try { if (typeof renderCards === 'function') renderCards(); } catch (_) {}
+        refreshDynScreens();
         if (screenTimeline.length) {
-          showTimelineImage(Math.min(slideshowIdx, screenTimeline.length - 1));
+          showTimelineImage(Math.min(slideshowIdx, Math.max(0, screenTimeline.length - 1)));
         }
         if (slideshowOn) startSlideshow();
-        try { if (typeof renderCards === 'function') renderCards(); } catch (_) {}
         return true;
       }
       if (msg.type === 'screen-timeline-slideshow') {

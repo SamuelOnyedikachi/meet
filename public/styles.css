@@ -1532,8 +1532,9 @@ body.dark .history-card {
   gap: 0;
 }
 .participant-list {
-  flex: 0 1 auto;
-  max-height: 40%;
+  flex: 1 1 auto;
+  max-height: none;
+  min-height: 0;
   overflow-y: auto;
 }
 .side-chat {
@@ -5362,4 +5363,103 @@ body.in-meeting-mobile.sec-in-panel #securityDrawer {
 }
 .dyn-people-toolbar {
   margin-bottom: 0.5rem;
+}
+
+
+/* People lists: full available height (desktop sidebar + mobile dynamic panel) */
+#peopleTab.side-tab-panel,
+#peopleTab.side-tab-panel.active {
+  display: flex !important;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden; /* toolbar sticky; list scrolls */
+}
+#peopleTab .tab-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  background: var(--surface, #fff);
+  padding-bottom: 0.35rem;
+  margin-bottom: 0.35rem;
+}
+#peopleTab .participant-list,
+#participantList {
+  flex: 1 1 auto !important;
+  max-height: none !important;
+  min-height: 0 !important;
+  overflow-y: auto;
+  height: auto;
+}
+
+/* Dynamic panel people */
+#dynPanePeople {
+  display: flex !important;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  max-height: none;
+  flex: 1 1 auto;
+}
+#dynPanePeople .dyn-people-toolbar,
+#dynPanePeople .tab-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--surface, #fff);
+  padding: 0.25rem 0 0.45rem;
+  margin-bottom: 0.25rem;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+}
+#dynPanePeople .participant-list,
+#dynParticipantList {
+  flex: 1 1 auto !important;
+  max-height: none !important;
+  min-height: 12rem;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Dynamic panel body should allow full-height children */
+.dynamic-panel-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+.dynamic-panel-body .dyn-pane:not(.hidden) {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.dynamic-panel-title {
+  flex-shrink: 0;
+}
+
+/* Screen cards on mobile: ensure timeline cards visible in dyn list */
+#dynScreensList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  min-height: 2.5rem;
+}
+#dynScreensList .screen-card,
+#dynScreensList .timeline-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.45rem 0.65rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface-soft, #f6f7fb);
+  cursor: pointer;
+  max-width: 100%;
+}
+#dynScreensList .timeline-card img.card-thumb {
+  width: 36px;
+  height: 24px;
+  object-fit: cover;
+  border-radius: 4px;
 }
