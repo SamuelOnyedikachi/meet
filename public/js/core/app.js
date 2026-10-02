@@ -5390,87 +5390,273 @@
       pane.innerHTML = '';
       try { if (typeof syncMoreMenuInCall === 'function') syncMoreMenuInCall(); } catch (_) {}
 
-      function addItem(label, icon, onClick) {
+      function meetingCodeDisplay() {
+        if (!currentMeeting) return '';
+        var code = currentMeeting.code || '';
+        if (currentMeeting.letters && currentMeeting.numbers) {
+          return String(currentMeeting.letters).toUpperCase() + '-' + String(currentMeeting.numbers);
+        }
+        if (code.length >= 6) return code.slice(0, 3).toUpperCase() + '-' + code.slice(3);
+        return code.toUpperCase();
+      }
+      function inviteUrl() {
+        if (!currentMeeting) return location.href;
+        var code = currentMeeting.code || '';
+        var formatted = code.length === 6 ? code.slice(0, 3) + '-' + code.slice(3) : code;
+        var token = window.__lastInviteToken || '';
+        try { token = token || sessionStorage.getItem('meet-invite-' + code) || ''; } catch (_) {}
+        return token
+          ? (location.origin + '/' + formatted + '?key=' + token)
+          : (location.origin + '/' + formatted);
+      }
+      function addItem(label, icon, onClick, extraHtml) {
         var b = document.createElement('button');
         b.type = 'button';
         b.className = 'more-item dyn-more-btn';
-        b.innerHTML = '<i class="fa-solid ' + icon + '"></i> ' + label;
+        b.innerHTML = '<i class="fa-solid ' + icon + '"></i> <span class="dyn-more-label">' + label + '</span>' + (extraHtml || '');
         b.addEventListener('click', onClick);
         pane.appendChild(b);
+        return b;
       }
       function addSep() {
         var s = document.createElement('div');
         s.className = 'more-sep';
         pane.appendChild(s);
       }
+      function panelBackBar(titleText) {
+        var bar = document.createElement('div');
+        bar.className = 'dyn-back-bar';
+        var back = document.createElement('button');
+        back.type = 'button';
+        back.className = 'btn small-btn dyn-back-btn';
+        back.innerHTML = '<i class="fa-solid fa-arrow-left"></i> Back';
+        back.addEventListener('click', fillDynMore);
+        var h = document.createElement('h4');
+        h.className = 'dyn-sub-title';
+        h.textContent = titleText;
+        bar.appendChild(back);
+        bar.appendChild(h);
+        return bar;
+      }
 
-      // Reactions open inline (no overlay X)
+      // Reactions
       addItem('Reactions', 'fa-heart', function () {
         openDynamicPane('reactions', 'Reactions');
       });
       addSep();
-      addItem('Copy meeting code', 'fa-copy', function () {
-        var btn = document.querySelector('#moreMenu [data-action="copy-code"]') || document.getElementById('copyCodeBtn');
-        if (btn) btn.click();
-        else if (currentMeeting) {
-          var code = (currentMeeting.letters || '') + (currentMeeting.numbers || currentMeeting.code || '');
-          try { navigator.clipboard.writeText(code); showToast && showToast('Code copied'); } catch (_) {}
+
+      // Copy meeting code — show actual code e.g. THN-721 then copy icon
+      var codeStr = meetingCodeDisplay() || '———';
+      (function () {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'more-item dyn-more-btn dyn-copy-code-btn';
+        b.innerHTML =
+          '<span class="dyn-code-text">' + escapeHtml(codeStr) + '</span>' +
+          '<i class="fa-regular fa-copy dyn-copy-icon" aria-hidden="true"></i>';
+        b.title = 'Copy meeting code';
+        b.addEventListener('click', function () {
+          var pretty = meetingCodeDisplay() || codeStr;
+          try {
+            navigator.clipboard.writeText(pretty).then(function () {
+              if (typeof showToast === 'function') showToast('Code copied: ' + pretty);
+            }).catch(function () {
+              prompt('Copy meeting code:', pretty);
+            });
+          } catch (_) {
+            prompt('Copy meeting code:', pretty);
+          }
+        });
+        pane.appendChild(b);
+      })();
+
+      // Share invite link — native share when available
+      addItem('Share invite link', 'fa-share-nodes', function () {
+        var url = inviteUrl();
+        var title = (currentMeeting && currentMeeting.name) ? currentMeeting.name : 'Join my meeting';
+        var text = 'Join the meeting' + (codeStr ? ' (' + codeStr + ')' : '');
+        if (navigator.share) {
+          navigator.share({ title: title, text: text, url: url }).catch(function () {});
+        } else {
+          // Fallback panel with copy + open
+          pane.innerHTML = '';
+          pane.appendChild(panelBackBar('Share invite'));
+          var box = document.createElement('div');
+          box.className = 'dyn-share-box';
+          box.innerHTML =
+            '<p class="dyn-share-url">' + escapeHtml(url) + '</p>' +
+            '<button type="button" class="btn primary-btn full-width" id="dynCopyInvite"><i class="fa-regular fa-copy"></i> Copy link</button>';
+          pane.appendChild(box);
+          document.getElementById('dynCopyInvite')?.addEventListener('click', function () {
+            try {
+              navigator.clipboard.writeText(url).then(function () {
+                if (typeof showToast === 'function') showToast('Link copied');
+              });
+            } catch (_) { prompt('Copy invite link:', url); }
+          });
         }
       });
-      addItem('Share invite link', 'fa-link', function () {
-        var btn = document.querySelector('#moreMenu [data-action="share-link"]') || document.getElementById('shareLinkBtn');
-        if (btn) btn.click();
-      });
       addSep();
+
+      // Connection — open in dynamic panel
       addItem('Connection', 'fa-signal', function () {
-        // Render connection status in panel
         pane.innerHTML = '';
-        var title = document.createElement('h4');
-        title.className = 'dyn-sub-title';
-        title.textContent = 'Connection';
-        pane.appendChild(title);
+        pane.appendChild(panelBackBar('Connection'));
         var live = document.getElementById('liveStatusText');
-        var p = document.createElement('p');
-        p.className = 'st-empty';
-        p.textContent = (live && live.textContent) || 'Checking…';
-        pane.appendChild(p);
-        var back = document.createElement('button');
-        back.type = 'button';
-        back.className = 'btn small-btn';
-        back.textContent = 'Back';
-        back.addEventListener('click', fillDynMore);
-        pane.appendChild(back);
-        document.getElementById('moreConnectionBtn')?.click();
-      });
-      addItem('Activity', 'fa-list', function () {
-        document.getElementById('moreActivityBtn')?.click();
-        // Pull activity into panel if drawer exists
-        var body = document.querySelector('#activityDrawer .drawer-body, #activityList');
-        if (body) {
-          pane.innerHTML = '';
-          var h = document.createElement('h4');
-          h.className = 'dyn-sub-title';
-          h.textContent = 'Meeting activity';
-          pane.appendChild(h);
-          var clone = body.cloneNode(true);
+        var status = document.createElement('p');
+        status.className = 'dyn-conn-status';
+        status.textContent = (live && live.textContent) || 'Checking…';
+        pane.appendChild(status);
+        var diagBody = document.querySelector('#diagDrawer .drawer-body');
+        if (diagBody) {
+          var clone = diagBody.cloneNode(true);
           clone.querySelectorAll('[id]').forEach(function (el) { el.removeAttribute('id'); });
           pane.appendChild(clone);
-          var back = document.createElement('button');
-          back.type = 'button';
-          back.className = 'btn small-btn';
-          back.textContent = 'Back';
-          back.addEventListener('click', fillDynMore);
-          pane.appendChild(back);
+        } else {
+          var hint = document.createElement('p');
+          hint.className = 'st-empty';
+          hint.textContent = 'Connection details will appear here while you are in a call.';
+          pane.appendChild(hint);
+        }
+        // Refresh diagnostics if available (without leaving panel)
+        try {
+          if (typeof openDrawer === 'function') {
+            // touch openDiag internals by clicking then immediately hiding drawer
+            var drawer = document.getElementById('diagDrawer');
+            document.getElementById('moreConnectionBtn')?.click();
+            if (drawer) {
+              drawer.classList.add('hidden');
+              drawer.setAttribute('aria-hidden', 'true');
+            }
+          }
+        } catch (_) {}
+        // Re-read status after a tick
+        setTimeout(function () {
+          var live2 = document.getElementById('liveStatusText');
+          if (live2 && status) status.textContent = live2.textContent || status.textContent;
+          var diagBody2 = document.querySelector('#diagDrawer .drawer-body');
+          if (diagBody2 && !pane.querySelector('.drawer-body, .diag-body, .dyn-diag-clone')) {
+            var c2 = diagBody2.cloneNode(true);
+            c2.classList.add('dyn-diag-clone');
+            c2.querySelectorAll('[id]').forEach(function (el) { el.removeAttribute('id'); });
+            pane.appendChild(c2);
+          }
+        }, 200);
+      });
+
+      // Activity — open in dynamic panel
+      addItem('Activity', 'fa-list', function () {
+        pane.innerHTML = '';
+        pane.appendChild(panelBackBar('Meeting activity'));
+        var listWrap = document.createElement('div');
+        listWrap.className = 'dyn-activity-wrap';
+        listWrap.innerHTML = '<p class="st-empty">Loading activity…</p>';
+        pane.appendChild(listWrap);
+        (async function () {
+          try {
+            if (typeof loadActivity === 'function') await loadActivity();
+          } catch (_) {}
+          var srcList = document.getElementById('activityList');
+          listWrap.innerHTML = '';
+          if (srcList && srcList.children.length) {
+            var clone = srcList.cloneNode(true);
+            clone.removeAttribute('id');
+            listWrap.appendChild(clone);
+          } else {
+            listWrap.innerHTML = '<p class="st-empty">No activity yet.</p>';
+          }
+        })();
+      });
+
+      // Record — open controls in dynamic panel
+      addItem('Record', 'fa-circle', function () {
+        pane.innerHTML = '';
+        pane.appendChild(panelBackBar('Record meeting'));
+        var isRec = !!(typeof recordingState !== 'undefined' && recordingState && recordingState.status === 'recording');
+        var wrap = document.createElement('div');
+        wrap.className = 'dyn-record-wrap';
+        if (isRec) {
+          wrap.innerHTML =
+            '<p class="dyn-rec-live"><span class="rec-dot"></span> Recording in progress</p>' +
+            '<button type="button" class="btn danger-btn full-width" id="dynStopRec"><i class="fa-solid fa-stop"></i> Stop recording</button>';
+          pane.appendChild(wrap);
+          document.getElementById('dynStopRec')?.addEventListener('click', function () {
+            try { sendWS({ type: 'stop-recording' }); } catch (_) {}
+            if (typeof showToast === 'function') showToast('Stopping recording…');
+            setTimeout(fillDynMore, 400);
+          });
+        } else {
+          // Pull options from record modal if present
+          var modal = document.getElementById('recordModal');
+          var opts = document.createElement('div');
+          opts.className = 'dyn-record-opts';
+          opts.innerHTML =
+            '<label class="checkbox-label"><input type="checkbox" id="dynRecAudio" checked> Audio</label>' +
+            '<label class="checkbox-label"><input type="checkbox" id="dynRecVideo" checked> Video</label>' +
+            '<label class="checkbox-label"><input type="checkbox" id="dynRecScreen" checked> Screen share</label>' +
+            '<label class="checkbox-label"><input type="checkbox" id="dynRecChat"> Chat</label>' +
+            '<button type="button" class="btn primary-btn full-width" id="dynStartRec"><i class="fa-solid fa-circle"></i> Start recording</button>';
+          // Sync from modal if exists
+          try {
+            if (document.getElementById('recAudio')) document.getElementById('dynRecAudio').checked = !!document.getElementById('recAudio').checked;
+            if (document.getElementById('recVideo')) document.getElementById('dynRecVideo').checked = !!document.getElementById('recVideo').checked;
+            if (document.getElementById('recScreen')) document.getElementById('dynRecScreen').checked = !!document.getElementById('recScreen').checked;
+            if (document.getElementById('recChat')) document.getElementById('dynRecChat').checked = !!document.getElementById('recChat').checked;
+          } catch (_) {}
+          pane.appendChild(opts);
+          document.getElementById('dynStartRec')?.addEventListener('click', function () {
+            try {
+              sendWS({
+                type: 'start-recording',
+                audio: !!document.getElementById('dynRecAudio')?.checked,
+                video: !!document.getElementById('dynRecVideo')?.checked,
+                screenShare: !!document.getElementById('dynRecScreen')?.checked,
+                chat: !!document.getElementById('dynRecChat')?.checked,
+              });
+              if (typeof showToast === 'function') showToast('Recording started');
+            } catch (_) {}
+            setTimeout(fillDynMore, 400);
+          });
         }
       });
-      addItem('Record', 'fa-circle', function () {
-        document.getElementById('moreRecordBtn')?.click();
-      });
+
+      // Invite — open in dynamic panel
       addItem('Invite', 'fa-user-plus', function () {
-        var inv = document.querySelector('#moreMenu [data-action="invite"]') || document.getElementById('moreInviteBtn');
-        if (inv) inv.click();
+        pane.innerHTML = '';
+        pane.appendChild(panelBackBar('Invite people'));
+        var url = inviteUrl();
+        var box = document.createElement('div');
+        box.className = 'dyn-invite-box';
+        box.innerHTML =
+          '<label class="dyn-field-label">Invite link</label>' +
+          '<input type="text" class="dyn-invite-input" id="dynInviteInput" readonly value="' + escapeHtml(url) + '">' +
+          '<div class="dyn-invite-actions">' +
+          '<button type="button" class="btn primary-btn" id="dynInviteCopy"><i class="fa-regular fa-copy"></i> Copy</button>' +
+          '<button type="button" class="btn" id="dynInviteShare"><i class="fa-solid fa-share-nodes"></i> Share</button>' +
+          '</div>';
+        pane.appendChild(box);
+        document.getElementById('dynInviteCopy')?.addEventListener('click', function () {
+          try {
+            navigator.clipboard.writeText(url).then(function () {
+              if (typeof showToast === 'function') showToast('Link copied');
+            });
+          } catch (_) { prompt('Copy invite link:', url); }
+        });
+        document.getElementById('dynInviteShare')?.addEventListener('click', function () {
+          var title = (currentMeeting && currentMeeting.name) ? currentMeeting.name : 'Join my meeting';
+          if (navigator.share) {
+            navigator.share({ title: title, text: 'Join the meeting', url: url }).catch(function () {});
+          } else {
+            try {
+              navigator.clipboard.writeText(url).then(function () {
+                if (typeof showToast === 'function') showToast('Link copied');
+              });
+            } catch (_) {}
+          }
+        });
       });
       addSep();
+
       addItem('Theme', 'fa-moon', function () {
         document.querySelector('#moreMenu [data-action="theme"]')?.click();
       });
@@ -5482,42 +5668,55 @@
         showHistory();
       });
       addSep();
-      // Quality controls inline
+
+      // Media quality — 3 lines with styled selects
       var qWrap = document.createElement('div');
-      qWrap.className = 'quality-block dyn-quality';
-      qWrap.innerHTML = '<div class="more-section-label">Media quality</div>';
+      qWrap.className = 'dyn-quality';
+      qWrap.innerHTML = '<div class="dyn-quality-title">Media quality</div>';
       var origSend = document.getElementById('sendQualitySelect');
       var origView = document.getElementById('viewQualitySelect');
       if (origSend) {
-        var lab = document.createElement('label');
-        lab.innerHTML = '<span>Your screen</span>';
-        var sel = origSend.cloneNode(true);
+        var row1 = document.createElement('div');
+        row1.className = 'dyn-quality-row';
+        var lab1 = document.createElement('span');
+        lab1.className = 'dyn-quality-label';
+        lab1.textContent = 'Your screen';
+        var sel = document.createElement('select');
+        sel.className = 'dyn-quality-select';
         sel.id = 'dynSendQuality';
+        sel.innerHTML = origSend.innerHTML;
         sel.value = origSend.value;
         sel.addEventListener('change', function () {
           origSend.value = sel.value;
           origSend.dispatchEvent(new Event('change', { bubbles: true }));
         });
-        lab.appendChild(sel);
-        qWrap.appendChild(lab);
+        row1.appendChild(lab1);
+        row1.appendChild(sel);
+        qWrap.appendChild(row1);
       }
       if (origView) {
-        var lab2 = document.createElement('label');
-        lab2.innerHTML = '<span>Incoming</span>';
-        var sel2 = origView.cloneNode(true);
+        var row2 = document.createElement('div');
+        row2.className = 'dyn-quality-row';
+        var lab2 = document.createElement('span');
+        lab2.className = 'dyn-quality-label';
+        lab2.textContent = 'Incoming';
+        var sel2 = document.createElement('select');
+        sel2.className = 'dyn-quality-select';
         sel2.id = 'dynViewQuality';
+        sel2.innerHTML = origView.innerHTML;
         sel2.value = origView.value;
         sel2.addEventListener('change', function () {
           origView.value = sel2.value;
           origView.dispatchEvent(new Event('change', { bubbles: true }));
         });
-        lab2.appendChild(sel2);
-        qWrap.appendChild(lab2);
+        row2.appendChild(lab2);
+        row2.appendChild(sel2);
+        qWrap.appendChild(row2);
       }
       pane.appendChild(qWrap);
       addSep();
-      // Auth / leave
-      var inCall = !!(currentMeeting);
+
+      var inCall = !!currentMeeting;
       if (inCall) {
         addItem('Leave call', 'fa-right-from-bracket', function () {
           document.getElementById('leaveBtn')?.click() || document.querySelector('#moreMenu [data-action="leave"]')?.click();
