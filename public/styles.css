@@ -4741,12 +4741,38 @@ body.dark .notifications-list li { background: rgba(255,255,255,.04); }
   align-items: center;
   justify-content: space-around;
   gap: 0.15rem;
-  padding: 0.35rem 0.25rem calc(0.35rem + env(safe-area-inset-bottom, 0px));
-  min-height: 52px;
+  /* Clear system gesture / 3-button nav (Android) and home indicator (iOS).
+     safe-area alone is often 0 in some WebViews — enforce a real minimum. */
+  padding: 0.4rem 0.25rem max(1.35rem, calc(0.55rem + env(safe-area-inset-bottom, 0px)));
+  padding-bottom: max(1.35rem, calc(0.55rem + env(safe-area-inset-bottom, 0px)));
+  min-height: calc(52px + max(12px, env(safe-area-inset-bottom, 0px)));
   border-top: 1px solid var(--border);
   background: color-mix(in srgb, var(--surface) 97%, transparent);
   flex-shrink: 0;
   z-index: 10;
+  margin-bottom: 0;
+  box-sizing: border-box;
+}
+
+/* Extra clearance on short phones / when browser chrome reports no safe-area */
+@supports not (padding: max(0px, 1px)) {
+  .mobile-footer-nav {
+    padding-bottom: 1.35rem;
+  }
+}
+
+@media (max-width: 900px) {
+  body.in-meeting-mobile #meetingView,
+  body.in-meeting-mobile .layout {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  /* Keep dynamic panel content above the taller footer */
+  .dynamic-panel.open {
+    padding-bottom: 0;
+  }
+  .dynamic-panel-body {
+    padding-bottom: 0.25rem;
+  }
 }
 .mfn-btn {
   position: relative;
@@ -4803,7 +4829,10 @@ body.dark .notifications-list li { background: rgba(255,255,255,.04); }
   }
 
   .mobile-meet-header { display: flex !important; }
-  .mobile-footer-nav { display: flex !important; }
+  .mobile-footer-nav {
+    display: flex !important;
+    padding-bottom: max(1.35rem, calc(0.55rem + env(safe-area-inset-bottom, 0px))) !important;
+  }
 
   #meetingView .meeting-title-bar.desktop-only,
   #meetingView .screen-cards.desktop-only,
