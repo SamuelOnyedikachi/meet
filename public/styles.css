@@ -5173,3 +5173,193 @@ body.in-meeting-mobile.sec-in-panel #securityDrawer {
   gap: 0.45rem;
   padding: 0.35rem 0;
 }
+
+
+/* Participant accordion (mobile/tablet) */
+.participant-item {
+  flex-wrap: wrap;
+}
+.participant-item.is-expanded {
+  background: color-mix(in srgb, var(--primary-soft) 55%, transparent);
+  border-radius: 10px;
+}
+.participant-accordion {
+  flex: 1 1 100%;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.45rem 0.35rem 0.55rem;
+  margin-top: 0.2rem;
+  border-top: 1px solid var(--border);
+  animation: accDown 180ms ease-out;
+}
+@keyframes accDown {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.participant-accordion .acc-action,
+.participant-accordion button[data-act],
+.participant-accordion .menu-sheet-close {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 0.55rem 0.45rem;
+  border-radius: 8px;
+  font: inherit;
+  color: var(--text);
+  cursor: pointer;
+}
+.participant-accordion .acc-action:hover,
+.participant-accordion button[data-act]:hover {
+  background: var(--primary-soft);
+}
+.participant-accordion .acc-action.danger,
+.participant-accordion button.danger {
+  color: #c0392b;
+}
+.participant-accordion .menu-head,
+.participant-accordion .menu-sub,
+.participant-accordion .menu-sheet-top {
+  display: none;
+}
+
+/* Toast unmute ask — two lines */
+.toast.toast-unmute-ask {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.55rem;
+  min-width: min(92vw, 340px);
+  padding: 0.85rem 1rem;
+  border-radius: 14px;
+  box-shadow: 0 12px 40px rgba(0,0,0,.18);
+}
+.toast-line1 {
+  font-weight: 650;
+  font-size: 0.95rem;
+  line-height: 1.35;
+}
+.toast-line2 {
+  display: flex;
+  gap: 0.5rem;
+}
+.toast-line2 .toast-btn {
+  flex: 1;
+  border-radius: 10px;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-weight: 600;
+  cursor: pointer;
+}
+.toast-line2 .toast-btn.primary {
+  background: var(--primary);
+  color: #fff;
+  border-color: transparent;
+}
+
+/* Timeline nav arrows + zoom */
+.timeline-nav {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  pointer-events: none;
+  z-index: 6;
+  padding: 0 0.35rem;
+}
+.timeline-nav .tn-btn {
+  pointer-events: auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0,0,0,.45);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.timeline-nav .tn-btn:hover { background: rgba(0,0,0,.65); }
+#contentImage.timeline-zoomable {
+  cursor: zoom-in;
+  transition: transform .18s ease;
+  transform-origin: center center;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+/* Call control badges (desktop toolbar + mobile footer) */
+.call-btn { position: relative; }
+.call-badge, .mfn-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  background: var(--primary);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  z-index: 2;
+}
+.call-btn .call-badge { top: 0; right: 0; }
+.mfn-badge.hidden, .call-badge.hidden { display: none !important; }
+
+/* Quieter fullscreen chat PiP on mobile/tablet */
+@media (max-width: 900px) {
+  .chat-pip-stack {
+    max-width: 62vw;
+    gap: 0.25rem;
+  }
+  .chat-pip {
+    font-size: 0.72rem;
+    padding: 0.35rem 0.5rem;
+    opacity: 0.82;
+    border-radius: 10px;
+    max-width: 100%;
+  }
+  .chat-pip .pip-who {
+    font-size: 0.68rem;
+    opacity: 0.85;
+  }
+  .chat-pip .pip-text {
+    font-size: 0.72rem;
+    line-height: 1.25;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .chat-screen-overlay {
+    font-size: 0.8rem;
+  }
+  .chat-overlay-messages {
+    font-size: 0.78rem;
+  }
+}
+
+.raised-hands-panel .rh-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.dyn-people-toolbar {
+  margin-bottom: 0.5rem;
+}

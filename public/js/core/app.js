@@ -728,10 +728,12 @@
         return;
       }
       if (msg.type === 'ask-unmute') {
-        showToast((msg.byName || 'Host') + ' is asking you to unmute.', [
+        showToast((msg.byName || 'Host') + ' wants you to unmute', [
           { label: 'Unmute', onClick: function () {
-            try { if (!micEnabled) toggleMic(); } catch (_) {}
-            sendWS({ type: 'unmute-self' });
+            try {
+              if (!micOn) toggleMic();
+            } catch (_) {}
+            try { sendWS({ type: 'unmute-self' }); } catch (_) {}
           }},
           { label: 'Dismiss', onClick: function () {} },
         ]);
@@ -1615,14 +1617,26 @@
   }
 
   function updateMicButton() {
-    if (!micBtn) return;
-    micBtn.classList.toggle('active', micOn);
-    micBtn.classList.toggle('off', !micOn);
-    micBtn.classList.toggle('muted-state', !micOn);
-    micBtn.innerHTML = micOn
-      ? '<i class="fa-solid fa-microphone"></i><span>Mic</span>'
-      : '<i class="fa-solid fa-microphone-slash"></i><span>Mic</span>';
-    micBtn.title = micOn ? 'Mute microphone (M)' : 'Unmute microphone (M)';
+    if (micBtn) {
+      micBtn.classList.toggle('active', micOn);
+      micBtn.classList.toggle('off', !micOn);
+      micBtn.classList.toggle('muted-state', !micOn);
+      micBtn.innerHTML = micOn
+        ? '<i class="fa-solid fa-microphone"></i><span>Mic</span>'
+        : '<i class="fa-solid fa-microphone-slash"></i><span>Mic</span>';
+      micBtn.title = micOn ? 'Mute microphone (M)' : 'Unmute microphone (M)';
+    }
+    // Mobile/tablet footer mic must mirror state immediately (host force-mute etc.)
+    var mfnMic = document.getElementById('mfnMic');
+    if (mfnMic) {
+      mfnMic.classList.toggle('muted-state', !micOn);
+      mfnMic.classList.toggle('off', !micOn);
+      mfnMic.classList.toggle('active', micOn);
+      mfnMic.innerHTML = micOn
+        ? '<i class="fa-solid fa-microphone"></i>'
+        : '<i class="fa-solid fa-microphone-slash"></i>';
+      mfnMic.title = micOn ? 'Mute microphone' : 'Unmute microphone';
+    }
   }
 
   function getLocalScreenTrack() {
@@ -1769,6 +1783,7 @@
 
 
   function renderParticipants() {
+    try { if (typeof window.__updateNavBadges === 'function') setTimeout(window.__updateNavBadges, 0); } catch (_) {}
     if (!participantList) return;
     participantList.innerHTML = '';
     const raisedListEl = document.getElementById('raisedHandsList');
@@ -1841,6 +1856,98 @@
         const openMenu = (e) => {
           e.preventDefault();
           e.stopPropagation();
+          const isMobile = window.matchMedia('(max-width: 900px)').matches;
+          if (isMobile) {
+            // Accordion: expand actions under this participant row
+            const existing = li.querySelector('.participant-accordion');
+            document.querySelectorAll('.participant-accordion').forEach((acc) => {
+              if (acc !== existing) acc.remove();
+            });
+            document.querySelectorAll('.participant-item.is-expanded').forEach((row) => {
+              if (row !== li) row.classList.remove('is-expanded');
+            });
+            if (existing) {
+              existing.remove();
+              li.classList.remove('is-expanded');
+              return;
+            }
+            li.classList.add('is-expanded');
+            const panel = document.createElement('div');
+            panel.className = 'participant-accordion';
+            // Build actions by temporarily using menu HTML generation
+            ensureModPermissions();
+            const role = p.role || (p.isHost ? 'host' : 'participant');
+            const hostLike = myRole === 'host' || myRole === 'cohost' || !!(currentMeeting && currentMeeting.isHost);
+            let actions = [];
+            if (opts && opts.waiting) {
+              actions = [
+                { act: 'admit', label: 'Admit', icon: 'fa-check' },
+                { act: 'decline', label: 'Decline', icon: 'fa-xmark', danger: true },
+              ];
+            } else {
+              const canMute = !!(myPermissions.muteOthers || hostLike);
+              const canLower = !!(myPermissions.lowerHands || hostLike);
+              const canRole = !!(myPermissions.manageRoles || myRole === 'host');
+              const canRemove = !!(myPermissions.removePeople || hostLike);
+              if (canMute) {
+                actions.push({ act: 'mute', label: 'Mute', icon: 'fa-microphone-slash' });
+                actions.push({ act: 'ask-unmute', label: 'Ask to unmute', icon: 'fa-microphone' });
+              }
+              if (canLower && p.handRaised) actions.push({ act: 'lower-hand', label: 'Lower hand', icon: 'fa-hand' });
+              if (p.sharing && canMute) actions.push({ act: 'stop-share', label: 'Stop sharing', icon: 'fa-desktop' });
+              if (canRole && role !== 'host') {
+                if (role !== 'cohost') actions.push({ act: 'make-cohost', label: 'Make co-host', icon: 'fa-user-shield' });
+                else actions.push({ act: 'remove-cohost', label: 'Remove co-host', icon: 'fa-user' });
+              }
+              if (myRole === 'host' && role !== 'host') actions.push({ act: 'transfer-host', label: 'Transfer host', icon: 'fa-crown' });
+              if (canRemove && role !== 'host') actions.push({ act: 'remove', label: 'Remove', icon: 'fa-user-minus', danger: true });
+              // Per-user timeline permission for host/cohost
+              if (canRole && role !== 'host') {
+                const pp = p.permissions || {};
+                const tlOn = !!pp.screenTimeline;
+                actions.push({ act: 'toggle-timeline', label: tlOn ? 'Disable timeline' : 'Allow timeline', icon: 'fa-images' });
+              }
+            }
+            if (!actions.length) {
+              panel.innerHTML = '<div class="acc-empty">No actions available</div>';
+            } else {
+              actions.forEach((a) => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'acc-action' + (a.danger ? ' danger' : '');
+                btn.innerHTML = '<i class="fa-solid ' + a.icon + '"></i> ' + a.label;
+                btn.addEventListener('click', (ev) => {
+                  ev.preventDefault();
+                  ev.stopPropagation();
+                  // Reuse openParticipantMenu path by synthesizing click on floating menu actions
+                  openParticipantMenu(p, 0, 0, opts);
+                  setTimeout(() => {
+                    const menu = document.getElementById('participantMenu');
+                    if (!menu) return;
+                    if (a.act === 'toggle-timeline') {
+                      const inp = menu.querySelector('input[data-perm="screenTimeline"]');
+                      if (inp) {
+                        inp.checked = !inp.checked;
+                        inp.dispatchEvent(new Event('change', { bubbles: true }));
+                      }
+                      menu.classList.add('hidden');
+                      panel.remove();
+                      li.classList.remove('is-expanded');
+                      return;
+                    }
+                    const target = menu.querySelector('[data-act="' + a.act + '"]');
+                    if (target) target.click();
+                    menu.classList.add('hidden');
+                    panel.remove();
+                    li.classList.remove('is-expanded');
+                  }, 30);
+                });
+                panel.appendChild(btn);
+              });
+            }
+            li.appendChild(panel);
+            return;
+          }
           openParticipantMenu(p, e.clientX || (e.touches && e.touches[0]?.clientX) || 40, e.clientY || (e.touches && e.touches[0]?.clientY) || 40, opts);
         };
         more.addEventListener('click', openMenu);
@@ -1938,6 +2045,7 @@
   }
 
   function renderCards() {
+    try { if (typeof window.__updateNavBadges === 'function') setTimeout(window.__updateNavBadges, 0); } catch (_) {}
     if (!screenCards) return;
     screenCards.innerHTML = '';
 
@@ -2104,6 +2212,10 @@
     historyView?.classList.add('hidden');
     meetingView?.classList.remove('hidden');
     leaveBtn?.classList.remove('hidden');
+    try {
+      const rb = document.getElementById('rejoinBar');
+      if (rb) rb.classList.add('hidden');
+    } catch (_) {}
     if (meetingBadge) {
       meetingBadge.textContent = formatCode(currentMeeting.letters, currentMeeting.numbers);
       meetingBadge.classList.remove('hidden');
@@ -2677,6 +2789,29 @@
     // Mirror into screen overlay + PiP when fullscreen / overlay open
     mirrorChatToOverlay(row);
     if (!isMe) maybeShowChatPip(msg, who, body, msg.attachment);
+
+    // Unread badge when chat pane/tab not focused
+    if (!isMe) {
+      try {
+        var chatFocused = false;
+        var activeTab = document.querySelector('.side-tab.active');
+        if (activeTab && activeTab.dataset.tab === 'chat') chatFocused = true;
+        var dyn = document.getElementById('dynamicPanel');
+        if (dyn && dyn.classList.contains('open') && document.getElementById('dynPaneChat') && !document.getElementById('dynPaneChat').classList.contains('hidden')) chatFocused = true;
+        var sheet = document.getElementById('chatSheet');
+        if (sheet && !sheet.classList.contains('hidden')) chatFocused = true;
+        if (!chatFocused) {
+          var badge = document.getElementById('chatUnreadBadge');
+          if (badge) {
+            var n = parseInt(badge.textContent, 10) || 0;
+            n += 1;
+            badge.textContent = String(n);
+            badge.classList.remove('hidden');
+          }
+        }
+        if (typeof window.__updateNavBadges === 'function') window.__updateNavBadges();
+      } catch (_) {}
+    }
   }
 
   function bindVoicePlayer(wrap) {
@@ -2866,16 +3001,19 @@
   }
 
   async function forceMuteLocal(msg) {
+    micOn = false;
+    try { if (typeof updateMicButton === 'function') updateMicButton(); } catch (_) {}
     try {
       if (room && room.localParticipant) {
         await room.localParticipant.setMicrophoneEnabled(false);
       }
-      micOn = false;
-      if (typeof updateMicButton === 'function') updateMicButton();
     } catch (e) { console.warn(e); }
+    micOn = false;
+    try { if (typeof updateMicButton === 'function') updateMicButton(); } catch (_) {}
     var who = msg.byName ? (' by ' + msg.byName) : '';
     var el = $('liveStatusText');
     if (el) el.textContent = 'Mic muted' + who;
+    if (typeof showToast === 'function') showToast('You were muted' + who);
   }
 
   function openContentModal(mode) {
@@ -3706,22 +3844,39 @@
     const host = document.getElementById('toastHost');
     if (!host) return;
     const el = document.createElement('div');
-    el.className = 'toast';
-    el.innerHTML = `<span>${escapeHtml(message)}</span>`;
-    if (actions && actions.length) {
+    const isUnmuteAsk = !!(actions && actions.length && /unmute/i.test(message || ''));
+    el.className = 'toast' + (isUnmuteAsk ? ' toast-unmute-ask' : '');
+    if (isUnmuteAsk) {
+      el.innerHTML = `<div class="toast-line1">${escapeHtml(message)}</div><div class="toast-line2"></div>`;
+      const row = el.querySelector('.toast-line2');
       actions.forEach((a) => {
         const b = document.createElement('button');
         b.type = 'button';
+        b.className = a.label && /unmute/i.test(a.label) ? 'toast-btn primary' : 'toast-btn';
         b.textContent = a.label;
         b.addEventListener('click', () => {
           a.onClick && a.onClick();
           el.remove();
         });
-        el.appendChild(b);
+        row.appendChild(b);
       });
+    } else {
+      el.innerHTML = `<span>${escapeHtml(message)}</span>`;
+      if (actions && actions.length) {
+        actions.forEach((a) => {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.textContent = a.label;
+          b.addEventListener('click', () => {
+            a.onClick && a.onClick();
+            el.remove();
+          });
+          el.appendChild(b);
+        });
+      }
     }
     host.appendChild(el);
-    setTimeout(() => { try { el.remove(); } catch (_) {} }, 5000);
+    setTimeout(() => { try { el.remove(); } catch (_) {} }, isUnmuteAsk ? 12000 : 5000);
   }
 
   function openParticipantMenu(p, x, y, opts) {
@@ -4630,35 +4785,53 @@
     updateGuestLabel();
     setInterval(updateGuestLabel, 2000);
 
-    // Rejoin bar when session exists for code in URL
+    // Auto-rejoin when session matches URL code (no sticky rejoin bar after success)
     try {
       const sess = typeof loadSession === 'function' ? loadSession() : null;
       const pathCode = (location.pathname || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+      const bar = document.getElementById('rejoinBar');
+      if (bar) bar.classList.add('hidden');
       if (sess && sess.code && pathCode && sess.code === pathCode && !currentMeeting) {
-        const bar = document.getElementById('rejoinBar');
-        if (bar) {
-          bar.classList.remove('hidden');
-          document.getElementById('rejoinBtn')?.addEventListener('click', async () => {
-            bar.classList.add('hidden');
-            const yourName = sess.participantName || (typeof displayNameOf === 'function' ? displayNameOf(currentUser) : 'Guest');
-            const urlKey = new URLSearchParams(location.search).get('key') || sessionStorage.getItem('meet-invite-' + sess.code) || undefined;
-            try {
-              const data = await api('/api/join', {
-                method: 'POST',
-                body: JSON.stringify({
-                  code: sess.code,
-                  participantId: sess.participantId,
-                  participantName: yourName,
-                  key: urlKey,
-                  device: detectDevice(),
-                }),
-              });
-              await showMeeting(data, !!sess.isHost, { participantName: yourName });
-            } catch (e) {
-              showToast(e.message || 'Could not rejoin');
+        const yourName = sess.participantName || (typeof displayNameOf === 'function' ? displayNameOf(currentUser) : '');
+        const urlKey = new URLSearchParams(location.search).get('key') || sessionStorage.getItem('meet-invite-' + sess.code) || undefined;
+        (async function autoRejoin() {
+          try {
+            if (!yourName) {
+              // fall back to tryRejoinFromUrl / name prompt path
+              if (typeof tryRejoinFromUrl === 'function') await tryRejoinFromUrl();
+              return;
             }
-          });
-        }
+            const data = await api('/api/join', {
+              method: 'POST',
+              body: JSON.stringify({
+                code: sess.code,
+                participantId: sess.participantId,
+                participantName: yourName,
+                key: urlKey,
+                device: typeof detectDevice === 'function' ? detectDevice() : undefined,
+              }),
+            });
+            await showMeeting(data, !!sess.isHost, { participantName: yourName, replaceUrl: true });
+            if (bar) bar.classList.add('hidden');
+          } catch (e) {
+            // Only show bar if auto-rejoin failed
+            if (bar) {
+              bar.classList.remove('hidden');
+              const btn = document.getElementById('rejoinBtn');
+              if (btn && !btn.dataset.wired) {
+                btn.dataset.wired = '1';
+                btn.addEventListener('click', async () => {
+                  bar.classList.add('hidden');
+                  try {
+                    if (typeof tryRejoinFromUrl === 'function') await tryRejoinFromUrl();
+                  } catch (err) {
+                    showToast(err.message || 'Could not rejoin');
+                  }
+                });
+              }
+            }
+          }
+        })();
       }
     } catch (_) {}
   }
@@ -5191,7 +5364,14 @@
         try { restoreSecurityBody(); } catch (_) {}
       }
       if (activePane === 'screens') refreshDynScreens();
-      if (activePane === 'chat') fillDynChat();
+      if (activePane === 'chat') {
+        fillDynChat();
+        try {
+          var badge = document.getElementById('chatUnreadBadge');
+          if (badge) { badge.textContent = '0'; badge.classList.add('hidden'); }
+          if (typeof window.__updateNavBadges === 'function') window.__updateNavBadges();
+        } catch (_) {}
+      }
       if (activePane === 'people') fillDynPeople();
       if (activePane === 'more') fillDynMore();
       if (activePane === 'security') fillDynSecurity();
@@ -5253,8 +5433,125 @@
       openDynamicPane('screens', 'Screens');
     });
     document.getElementById('mfnHand')?.addEventListener('click', function () {
-      document.getElementById('raiseHandBtn')?.click();
+      /* handled by pointer long-press/tap below */
     });
+    (function wireHand() {
+      var btn = document.getElementById('mfnHand');
+      if (!btn || btn.dataset.handWired) return;
+      btn.dataset.handWired = '1';
+      var longPress = false, timer = null;
+      btn.addEventListener('pointerdown', function () {
+        longPress = false;
+        timer = setTimeout(function () {
+          longPress = true;
+          openRaisedHandsPanel();
+        }, 420);
+      });
+      function end() {
+        if (timer) clearTimeout(timer);
+        timer = null;
+        if (!longPress) document.getElementById('raiseHandBtn')?.click();
+      }
+      btn.addEventListener('pointerup', end);
+      btn.addEventListener('pointerleave', function () { if (timer) clearTimeout(timer); timer = null; });
+      btn.addEventListener('pointercancel', function () { if (timer) clearTimeout(timer); timer = null; });
+    })();
+
+    function openRaisedHandsPanel() {
+      openDynamicPane('people', 'Raised hands');
+      var pane = document.getElementById('dynPanePeople');
+      if (!pane) return;
+      var raised = (participants || []).filter(function (p) { return p.handRaised; });
+      // Order: earliest raised first if raisedHands array exists
+      if (Array.isArray(raisedHands) && raisedHands.length) {
+        var order = {};
+        raisedHands.forEach(function (h, i) {
+          var id = h.participantId || h.id || h;
+          order[id] = i;
+        });
+        raised.sort(function (a, b) {
+          var ia = order[a.id];
+          var ib = order[b.id];
+          if (ia == null) ia = 999;
+          if (ib == null) ib = 999;
+          return ia - ib;
+        });
+      }
+      var hostLike = myRole === 'host' || myRole === 'cohost' || (currentMeeting && currentMeeting.isHost);
+      var html = '<div class="raised-hands-panel">';
+      if (!raised.length) html += '<p class="st-empty">No raised hands</p>';
+      else {
+        raised.forEach(function (p) {
+          html += '<div class="rh-row" data-id="' + escapeHtml(p.id) + '">' +
+            '<span class="rh-name">' + escapeHtml(p.name) + '</span>';
+          if (hostLike) {
+            html += '<button type="button" class="btn small-btn rh-lower" data-id="' + escapeHtml(p.id) + '">Lower</button>';
+          }
+          html += '</div>';
+        });
+      }
+      html += '</div>';
+      pane.innerHTML = html;
+      pane.querySelectorAll('.rh-lower').forEach(function (b) {
+        b.addEventListener('click', function () {
+          try { sendWS({ type: 'lower-hand', targetId: b.getAttribute('data-id') }); } catch (_) {}
+          setTimeout(openRaisedHandsPanel, 200);
+        });
+      });
+    }
+
+    window.__updateNavBadges = function updateNavBadges() {
+      // Screens: live shares + timeline images present
+      var screenCount = 0;
+      try {
+        screenCount = (participants || []).filter(function (p) {
+          return p.sharing || (currentMeeting && p.id === currentMeeting.participantId && typeof isSharing !== 'undefined' && isSharing);
+        }).length;
+        if (typeof window.__hasTimelineImages === 'function' && window.__hasTimelineImages()) {
+          // count timeline as at least 1 selectable screen group
+          var st = window.__getTimelineState && window.__getTimelineState();
+          var owners = {};
+          (st && st.items || []).forEach(function (it) { owners[it.ownerId || 't'] = 1; });
+          screenCount += Object.keys(owners).length;
+        }
+      } catch (_) {}
+      // Hands
+      var handCount = 0;
+      try {
+        handCount = (participants || []).filter(function (p) { return p.handRaised; }).length;
+      } catch (_) {}
+      // People
+      var peopleCount = (participants || []).length;
+      // Chat unread
+      var chatUnread = 0;
+      try {
+        var badge = document.getElementById('chatUnreadBadge');
+        if (badge && !badge.classList.contains('hidden')) chatUnread = parseInt(badge.textContent, 10) || 0;
+      } catch (_) {}
+
+      function setBadge(el, n) {
+        if (!el) return;
+        if (n > 0) {
+          el.textContent = n > 99 ? '99+' : String(n);
+          el.classList.remove('hidden');
+        } else {
+          el.textContent = '0';
+          el.classList.add('hidden');
+        }
+      }
+      setBadge(document.getElementById('mfnScreenBadge'), screenCount);
+      setBadge(document.getElementById('mfnHandBadge'), handCount);
+      setBadge(document.getElementById('mfnChatBadge'), chatUnread);
+      setBadge(document.getElementById('mfnPeopleBadge'), peopleCount);
+      // Desktop toolbar badges if present
+      setBadge(document.getElementById('toolbarScreenBadge'), screenCount);
+      setBadge(document.getElementById('toolbarHandBadge'), handCount);
+      setBadge(document.getElementById('toolbarChatBadge'), chatUnread);
+      setBadge(document.getElementById('toolbarPeopleBadge'), peopleCount);
+      // Sidebar people count already on participantCount
+      var pc = document.getElementById('participantCount');
+      if (pc) pc.textContent = String(peopleCount);
+    };
     document.getElementById('mfnChat')?.addEventListener('click', function () {
       if (isMobileLayout()) openDynamicPane('chat', 'Chat');
       else document.getElementById('toolbarChatBtn')?.click();
@@ -5376,12 +5673,123 @@
     function fillDynPeople() {
       var pane = document.getElementById('dynPanePeople');
       if (!pane) return;
-      var source = document.querySelector('#peopleTab') || document.querySelector('#col1 .people-panel');
-      if (!source) { pane.innerHTML = '<p class="st-empty">No participants</p>'; return; }
       pane.innerHTML = '';
-      var clone = source.cloneNode(true);
-      clone.querySelectorAll('[id]').forEach(function (el) { el.removeAttribute('id'); });
-      pane.appendChild(clone);
+      // Live people UI for mobile: search + device toggle + list (works, not a dead clone)
+      var toolbar = document.createElement('div');
+      toolbar.className = 'tab-toolbar dyn-people-toolbar';
+      toolbar.innerHTML =
+        '<input type="search" id="dynPeopleSearch" class="people-search" placeholder="Search participants…" autocomplete="off">' +
+        '<button type="button" id="dynDeviceToggle" class="btn icon-btn device-toggle" title="Show device icons" aria-pressed="true">' +
+        '<i class="fa-solid fa-mobile-screen"></i></button>';
+      pane.appendChild(toolbar);
+      var list = document.createElement('ul');
+      list.className = 'participant-list';
+      list.id = 'dynParticipantList';
+      pane.appendChild(list);
+
+      function paint() {
+        list.innerHTML = '';
+        var q = (document.getElementById('dynPeopleSearch')?.value || '').trim().toLowerCase();
+        var src = participants || [];
+        if (q) {
+          src = src.filter(function (p) {
+            return String(p.name || '').toLowerCase().indexOf(q) >= 0 ||
+              String(p.roleLabel || p.role || '').toLowerCase().indexOf(q) >= 0;
+          });
+        }
+        var sorted = src.slice().sort(function (a, b) {
+          var rank = function (p) {
+            if (p.role === 'host' || p.isHost) return 0;
+            if (p.role === 'cohost') return 1;
+            if (p.role === 'guest') return 3;
+            return 2;
+          };
+          var ra = rank(a), rb = rank(b);
+          if (ra !== rb) return ra - rb;
+          return String(a.name || '').localeCompare(String(b.name || ''));
+        });
+        var myId = currentMeeting && currentMeeting.participantId;
+        sorted.forEach(function (p) {
+          var li = document.createElement('li');
+          li.className = 'participant-item';
+          if (p.id === myId) li.classList.add('me');
+          var deviceHtml = (typeof showDeviceIcons !== 'undefined' && showDeviceIcons)
+            ? '<i class="fa-solid ' + (typeof deviceIcon === 'function' ? deviceIcon(p.device) : 'fa-desktop') + ' device-icon"></i>'
+            : '';
+          var role = p.role || (p.isHost ? 'host' : 'participant');
+          li.innerHTML = deviceHtml +
+            '<span class="p-name">' + escapeHtml(p.name) +
+            (p.id === myId ? ' <span class="me-tag">(you)</span>' : '') +
+            ' <span class="role-tag">' + escapeHtml(p.roleLabel || role) + '</span>' +
+            (p.handRaised ? ' ✋' : '') +
+            (p.mutedByHost ? ' <span class="host-tag">muted</span>' : '') +
+            '</span>';
+          var canAct = p.id !== myId && (
+            (typeof canModerateNow === 'function' && canModerateNow()) ||
+            (typeof isHostLike === 'function' && isHostLike()) ||
+            myRole === 'host' || myRole === 'cohost'
+          );
+          if (canAct) {
+            var more = document.createElement('button');
+            more.type = 'button';
+            more.className = 'btn icon-btn participant-more';
+            more.innerHTML = '<i class="fa-solid fa-ellipsis"></i>';
+            more.addEventListener('click', function (e) {
+              e.preventDefault();
+              e.stopPropagation();
+              // Expand accordion under this row on mobile/tablet
+              var existing = li.querySelector('.participant-accordion');
+              list.querySelectorAll('.participant-accordion').forEach(function (acc) {
+                if (acc !== existing) acc.remove();
+              });
+              if (existing) { existing.remove(); return; }
+              openParticipantMenu(p, e.clientX || 40, e.clientY || 40, {});
+              // Move floating menu content under the row
+              setTimeout(function () {
+                var menu = document.getElementById('participantMenu');
+                if (!menu || menu.classList.contains('hidden')) return;
+                var panel = document.createElement('div');
+                panel.className = 'participant-accordion';
+                panel.innerHTML = menu.innerHTML;
+                menu.classList.add('hidden');
+                panel.querySelectorAll('button[data-act], label.perm-row input').forEach(function (el) {
+                  el.addEventListener('click', function (ev) {
+                    // re-open original menu actions by matching
+                    var act = el.getAttribute('data-act');
+                    if (act) {
+                      openParticipantMenu(p, 0, 0, {});
+                      setTimeout(function () {
+                        var m2 = document.getElementById('participantMenu');
+                        var t = m2 && m2.querySelector('[data-act="' + act + '"]');
+                        if (t) t.click();
+                        if (m2) m2.classList.add('hidden');
+                      }, 20);
+                    }
+                  });
+                });
+                li.appendChild(panel);
+              }, 40);
+            });
+            li.appendChild(more);
+          }
+          list.appendChild(li);
+        });
+        if (!sorted.length) {
+          list.innerHTML = '<li class="participant-item"><span class="p-name st-empty">No matches</span></li>';
+        }
+      }
+      document.getElementById('dynPeopleSearch')?.addEventListener('input', paint);
+      document.getElementById('dynDeviceToggle')?.addEventListener('click', function () {
+        try {
+          showDeviceIcons = !showDeviceIcons;
+          this.setAttribute('aria-pressed', String(showDeviceIcons));
+          var main = document.getElementById('deviceToggle');
+          if (main) main.setAttribute('aria-pressed', String(showDeviceIcons));
+          if (typeof renderParticipants === 'function') renderParticipants();
+        } catch (_) {}
+        paint();
+      });
+      paint();
     }
 
     function fillDynMore() {
@@ -5851,7 +6259,7 @@
         if (!screenTimeline.length) {
           var empty = document.createElement('p');
           empty.className = 'st-empty';
-          empty.textContent = 'No timeline images yet. Hosts can add up to 3.';
+          empty.textContent = 'No timeline images yet. Hosts can add up to 10.';
           slots.appendChild(empty);
           return;
         }
@@ -5884,14 +6292,19 @@
       var contentView = document.getElementById('contentView');
       var remoteVideo = document.getElementById('remoteVideo');
       var lkVid = document.getElementById('lkScreenVideo');
-      // Hide live video when viewing timeline still
       if (remoteVideo) {
         remoteVideo.classList.add('hidden');
         remoteVideo.style.display = 'none';
       }
       if (lkVid) lkVid.style.display = 'none';
       if (contentView) contentView.classList.remove('hidden');
-      if (img) { img.src = item.dataUrl; img.classList.remove('hidden'); }
+      if (img) {
+        img.src = item.dataUrl;
+        img.classList.remove('hidden');
+        img.classList.add('timeline-zoomable');
+        img.style.transform = 'scale(1)';
+        img.dataset.zoom = '1';
+      }
       if (placeholder) placeholder.classList.add('hidden');
       ['contentFrame', 'pdfCanvasWrap', 'localMediaVideo'].forEach(function (id) {
         var el = document.getElementById(id);
@@ -5899,13 +6312,80 @@
       });
       var label = document.getElementById('bigViewLabel');
       if (label) {
-        label.textContent = (item.ownerName || 'Timeline') + ' · image';
+        var n = screenTimeline.length;
+        label.textContent = (item.ownerName || 'Timeline') + ' · ' + (idx + 1) + '/' + n;
         label.classList.add('visible');
       }
+      ensureTimelineNav();
       renderTimelineSlots();
-      // Refresh screen cards so timeline appears as a selectable "screen"
       try { if (typeof renderCards === 'function') renderCards(); } catch (_) {}
+      try { if (typeof window.__updateNavBadges === 'function') window.__updateNavBadges(); } catch (_) {}
       try { sendWS({ type: 'screen-timeline-select', index: slideshowIdx }); } catch (_) {}
+    }
+
+    function ensureTimelineNav() {
+      var big = document.getElementById('bigView');
+      if (!big) return;
+      var nav = document.getElementById('timelineNav');
+      if (!nav) {
+        nav = document.createElement('div');
+        nav.id = 'timelineNav';
+        nav.className = 'timeline-nav';
+        nav.innerHTML =
+          '<button type="button" class="tn-btn tn-prev" aria-label="Previous"><i class="fa-solid fa-chevron-left"></i></button>' +
+          '<button type="button" class="tn-btn tn-next" aria-label="Next"><i class="fa-solid fa-chevron-right"></i></button>';
+        big.appendChild(nav);
+        nav.querySelector('.tn-prev').addEventListener('click', function (e) {
+          e.stopPropagation();
+          if (!screenTimeline.length) return;
+          showTimelineImage((slideshowIdx - 1 + screenTimeline.length) % screenTimeline.length);
+        });
+        nav.querySelector('.tn-next').addEventListener('click', function (e) {
+          e.stopPropagation();
+          if (!screenTimeline.length) return;
+          showTimelineImage((slideshowIdx + 1) % screenTimeline.length);
+        });
+      }
+      nav.style.display = screenTimeline.length > 1 ? 'flex' : 'none';
+
+      // Swipe + keyboard + pinch-ish zoom (double-tap / click cycle)
+      var img = document.getElementById('contentImage');
+      if (img && !img.dataset.tlGestures) {
+        img.dataset.tlGestures = '1';
+        var touchX = 0;
+        img.addEventListener('touchstart', function (e) {
+          if (e.touches && e.touches[0]) touchX = e.touches[0].clientX;
+        }, { passive: true });
+        img.addEventListener('touchend', function (e) {
+          if (!e.changedTouches || !e.changedTouches[0]) return;
+          var dx = e.changedTouches[0].clientX - touchX;
+          if (Math.abs(dx) < 40 || screenTimeline.length < 2) return;
+          if (dx < 0) showTimelineImage((slideshowIdx + 1) % screenTimeline.length);
+          else showTimelineImage((slideshowIdx - 1 + screenTimeline.length) % screenTimeline.length);
+        }, { passive: true });
+        img.addEventListener('dblclick', function (e) {
+          e.preventDefault();
+          var z = parseFloat(img.dataset.zoom || '1');
+          z = z >= 2.5 ? 1 : (z >= 1.5 ? 2.5 : 1.5);
+          img.dataset.zoom = String(z);
+          img.style.transform = 'scale(' + z + ')';
+          img.style.cursor = z > 1 ? 'zoom-out' : 'zoom-in';
+        });
+        img.addEventListener('click', function (e) {
+          // single click zoom toggle lighter
+        });
+        document.addEventListener('keydown', function (e) {
+          if (!currentMeeting || !screenTimeline.length) return;
+          if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+          if (e.key === 'ArrowLeft') {
+            e.preventDefault();
+            showTimelineImage((slideshowIdx - 1 + screenTimeline.length) % screenTimeline.length);
+          } else if (e.key === 'ArrowRight') {
+            e.preventDefault();
+            showTimelineImage((slideshowIdx + 1) % screenTimeline.length);
+          }
+        });
+      }
     }
 
     function startSlideshow() {
@@ -5924,8 +6404,8 @@
     async function addTimelineImages(fileList) {
       if (!canEditTimeline()) return;
       var files = Array.from(fileList || []).filter(function (f) { return f.type.indexOf('image/') === 0; });
-      var room = 3 - screenTimeline.length;
-      if (room <= 0) { alert('Max 3 timeline images. Remove one to add another.'); return; }
+      var room = 10 - screenTimeline.length;
+      if (room <= 0) { alert('Max 10 timeline images. Remove one to add another.'); return; }
       files = files.slice(0, room);
       for (var i = 0; i < files.length; i++) {
         try {
@@ -6023,7 +6503,7 @@
       if (msg.type === 'screen-timeline-add' && msg.item) {
         if (!screenTimeline.some(function (x) { return x.id === msg.item.id; })) {
           screenTimeline.push(msg.item);
-          if (screenTimeline.length > 3) screenTimeline = screenTimeline.slice(-3);
+          if (screenTimeline.length > 10) screenTimeline = screenTimeline.slice(-10);
           renderTimelineSlots();
           if (screenTimeline.length === 1) showTimelineImage(0);
         }
@@ -6035,7 +6515,7 @@
         return true;
       }
       if (msg.type === 'screen-timeline-state' && Array.isArray(msg.items)) {
-        screenTimeline = msg.items.slice(0, 3);
+        screenTimeline = msg.items.slice(0, 10);
         slideshowOn = !!msg.slideshow;
         if (typeof msg.selected === 'number') slideshowIdx = msg.selected;
         document.querySelectorAll('#stSlideshowToggle, #stSlideshowToggleDesktop').forEach(function (x) {

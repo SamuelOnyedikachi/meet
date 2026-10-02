@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link rel="stylesheet" href="styles.css?v=20261002mobileFirstD">
+  <link rel="stylesheet" href="styles.css?v=20261002mobileFirstE">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤝</text></svg>">
 </head>
 <body>
@@ -476,7 +476,7 @@
                 </label>
               </div>
               <div class="st-slots" id="stSlotsDesktop">
-                <p class="st-empty" id="stEmptyDesktop">No timeline images. Hosts can add up to 3.</p>
+                <p class="st-empty" id="stEmptyDesktop">No timeline images. Hosts can add up to 10.</p>
               </div>
               <div class="st-actions host-cohost-only hidden" id="stActionsDesktop">
                 <button type="button" class="btn small-btn primary-btn" id="stAddImagesBtnDesktop"><i class="fa-solid fa-plus"></i> Add images</button>
@@ -568,7 +568,7 @@
                       </label>
                     </div>
                     <div class="st-slots" id="stSlots">
-                      <p class="st-empty" id="stEmpty">No timeline images yet. Hosts can add up to 3 images.</p>
+                      <p class="st-empty" id="stEmpty">No timeline images yet. Hosts can add up to 10 images.</p>
                     </div>
                     <div class="st-actions host-cohost-only hidden" id="stActions">
                       <button type="button" class="btn small-btn primary-btn" id="stAddImagesBtn"><i class="fa-solid fa-plus"></i> Add images</button>
@@ -614,18 +614,22 @@
               <button id="shareBtn" class="btn call-btn" title="Share screen" aria-label="Share screen">
                 <i class="fa-solid fa-desktop"></i>
                 <span>Share</span>
+                <span class="mfn-badge call-badge hidden" id="toolbarScreenBadge">0</span>
               </button>
               <button id="raiseHandBtn" class="btn call-btn" title="Raise hand (H)" aria-label="Raise hand" aria-pressed="false">
                 <i class="fa-solid fa-hand"></i>
                 <span>Hand</span>
+                <span class="mfn-badge call-badge hidden" id="toolbarHandBadge">0</span>
               </button>
               <button id="toolbarChatBtn" class="btn call-btn" title="Chat (C)" aria-label="Open chat">
                 <i class="fa-solid fa-comment"></i>
                 <span>Chat</span>
+                <span class="mfn-badge call-badge hidden" id="toolbarChatBadge">0</span>
               </button>
               <button id="toolbarPeopleBtn" class="btn call-btn" title="People" aria-label="Open people">
                 <i class="fa-solid fa-users"></i>
                 <span>People</span>
+                <span class="mfn-badge call-badge hidden" id="toolbarPeopleBadge">0</span>
               </button>
               <button id="securityBtn" class="btn call-btn hidden" title="Meeting security" aria-label="Meeting security">
                 <i class="fa-solid fa-shield-halved"></i>
@@ -697,9 +701,11 @@
               </button>
               <button type="button" class="mfn-btn" id="mfnScreen" title="Screens" aria-label="Screens" data-pane="screens">
                 <i class="fa-solid fa-desktop"></i>
+                <span class="mfn-badge hidden" id="mfnScreenBadge">0</span>
               </button>
-              <button type="button" class="mfn-btn" id="mfnHand" title="Raise hand" aria-label="Raise hand">
+              <button type="button" class="mfn-btn" id="mfnHand" title="Raise hand (hold for list)" aria-label="Raise hand">
                 <i class="fa-solid fa-hand"></i>
+                <span class="mfn-badge hidden" id="mfnHandBadge">0</span>
               </button>
               <button type="button" class="mfn-btn" id="mfnHeart" title="React (tap heart, hold for more)" aria-label="Reactions">
                 <i class="fa-solid fa-heart"></i>
@@ -710,6 +716,7 @@
               </button>
               <button type="button" class="mfn-btn" id="mfnPeople" title="People" aria-label="People" data-pane="people">
                 <i class="fa-solid fa-users"></i>
+                <span class="mfn-badge hidden" id="mfnPeopleBadge">0</span>
               </button>
               <button type="button" class="mfn-btn hidden" id="mfnSecurity" title="Security" aria-label="Security" data-pane="security">
                 <i class="fa-solid fa-shield-halved"></i>
@@ -1079,6 +1086,6 @@
   <script src="js/features/mute.js?v=20260924secMob1"></script>
   <script src="js/features/device-icons.js?v=20260924secMob1"></script>
   <script src="js/main.js?v=20260924secMob1"></script>
-  <script src="js/core/app.js?v=20261002mobileFirstD"></script>
+  <script src="js/core/app.js?v=20261002mobileFirstE"></script>
 </body>
 </html>

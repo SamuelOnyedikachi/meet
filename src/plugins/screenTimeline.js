@@ -1,4 +1,4 @@
-/** Screen timeline: up to 3 host/cohost images; acts as fallback "screen" for viewers */
+/** Screen timeline: up to 10 host/cohost images; acts as fallback "screen" for viewers */
 module.exports = {
   id: 'screenTimeline',
   register(ctx) {
@@ -30,7 +30,7 @@ module.exports = {
       if (!canEdit(meeting, participantId)) return;
       const st = ensure(meeting);
       if (!msg.item || !msg.item.dataUrl) return;
-      if (st.items.length >= 3) return;
+      if (st.items.length >= 10) return;
       const item = {
         id: String(msg.item.id || ('st-' + Date.now())).slice(0, 64),
         dataUrl: String(msg.item.dataUrl).slice(0, 2_500_000),
