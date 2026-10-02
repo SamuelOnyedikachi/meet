@@ -654,6 +654,12 @@
     socket.onmessage = (ev) => {
       let msg;
       try { msg = JSON.parse(ev.data); } catch { return; }
+      // Screen timeline must be handled here (not a fragile one-shot wrapper)
+      try {
+        if (msg && typeof window.__handleTimelineMsg === 'function') {
+          window.__handleTimelineMsg(msg);
+        }
+      } catch (_) {}
       if (window.__meetPhase2OnMsg) { try { window.__meetPhase2OnMsg(msg); } catch (_) {} }
       if (msg.type === 'meeting-ended') {
         // Server closed the room (empty or 12h inactivity)
@@ -1555,9 +1561,18 @@
       }
     } catch (e) {
       console.error('[LiveKit] startShare failed', e);
-      const msg = String((e && (e.message || e.name)) || '');
-      const denied = /NotAllowedError|Permission denied|denied|PermissionDismissed/i.test(msg);
+      const msg = String((e && (e.message || e.name || e.code)) || e);
+      const denied = /NotAllowedError|Permission denied|denied|PermissionDismissed|AbortError/i.test(msg + (e && e.name ? e.name : ''));
       const unsupported = /NotSupportedError|getDisplayMedia|not supported|undefined is not/i.test(msg);
+      if (denied) {
+        // User cancelled or blocked the browser share dialog — do not retry
+        if (typeof showToast === 'function') {
+          showToast('Screen share cancelled or blocked. Tap Share again and allow the browser prompt.');
+        } else {
+          alert('Screen share was cancelled or blocked.\n\nTap Share again, then choose a screen/window and allow it.\nIf this keeps failing, check site permissions for camera/screen in your browser settings.');
+        }
+        return;
+      }
       if (unsupported || !canScreenShare()) {
         alert(screenShareUnsupportedMessage());
         return;
@@ -1567,8 +1582,9 @@
       } catch (e2) {
         console.error(e2);
         const m2 = String((e2 && (e2.message || e2.name)) || msg);
-        if (/NotAllowedError|Permission denied|denied/i.test(m2) || denied) {
-          alert('Screen share permission was blocked.\n\nWhen the browser prompt appears, choose a screen/window and allow sharing. If you previously blocked it, reset site permissions for this origin.');
+        if (/NotAllowedError|Permission denied|denied|AbortError/i.test(m2)) {
+          if (typeof showToast === 'function') showToast('Screen share blocked — allow the browser permission prompt and try again.');
+          else alert('Screen share permission was blocked. Allow the browser prompt and try again.');
         } else if (/NotSupportedError|getDisplayMedia|not supported/i.test(m2)) {
           alert(screenShareUnsupportedMessage());
         } else {
@@ -6439,14 +6455,23 @@
     }
 
     async function addTimelineImages(fileList) {
-      if (!canEditTimeline()) return;
+      if (!canEditTimeline()) {
+        if (typeof showToast === 'function') showToast('You do not have permission to add timeline images');
+        return;
+      }
+      if (!currentMeeting) return;
       var files = Array.from(fileList || []).filter(function (f) { return f.type.indexOf('image/') === 0; });
       var room = 10 - screenTimeline.length;
       if (room <= 0) { alert('Max 10 timeline images. Remove one to add another.'); return; }
       files = files.slice(0, room);
+      var sent = 0;
       for (var i = 0; i < files.length; i++) {
         try {
-          var dataUrl = await toWebpDataUrl(files[i], 1280, 0.8);
+          // Smaller payload so WS broadcast succeeds on mobile networks
+          var dataUrl = await toWebpDataUrl(files[i], 960, 0.72);
+          if (dataUrl && dataUrl.length > 900000) {
+            dataUrl = await toWebpDataUrl(files[i], 720, 0.62);
+          }
           var item = {
             id: 'st-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
             dataUrl: dataUrl,
@@ -6454,9 +6479,19 @@
             ownerName: currentMeeting.participantName || 'Host'
           };
           screenTimeline.push(item);
-          try {
-            sendWS({ type: 'screen-timeline-add', item: { id: item.id, dataUrl: item.dataUrl, ownerId: item.ownerId, ownerName: item.ownerName } });
-          } catch (_) {}
+          var payload = { type: 'screen-timeline-add', item: { id: item.id, dataUrl: item.dataUrl, ownerId: item.ownerId, ownerName: item.ownerName } };
+          if (ws && ws.readyState === 1) {
+            try {
+              ws.send(JSON.stringify(payload));
+              sent++;
+            } catch (err) {
+              console.warn('[timeline] send failed', err);
+              if (typeof showToast === 'function') showToast('Could not send image to others (connection issue)');
+            }
+          } else {
+            console.warn('[timeline] WS not connected; image is local only until reconnect');
+            if (typeof showToast === 'function') showToast('Not connected — image saved locally only');
+          }
         } catch (e) { console.warn('timeline image failed', e); }
       }
       renderTimelineSlots();
@@ -6464,6 +6499,7 @@
       refreshDynScreens();
       if (screenTimeline.length) showTimelineImage(Math.max(0, screenTimeline.length - files.length));
       if (slideshowOn) startSlideshow();
+      if (sent && typeof showToast === 'function') showToast(sent === 1 ? 'Image shared to meeting' : sent + ' images shared');
     }
 
     function removeTimelineImage(id) {
@@ -6521,6 +6557,10 @@
       stopSlideshow();
       renderTimelineSlots();
       syncMobileChrome();
+      // Ask server for current timeline after join/rejoin (covers missed register race)
+      setTimeout(function () {
+        try { sendWS({ type: 'screen-timeline-request' }); } catch (_) {}
+      }, 500);
     };
     window.__resetScreenTimeline = function () {
       screenTimeline = [];
@@ -6604,28 +6644,10 @@
       return false;
     }
 
-    var wsMsgHookInstalled = false;
+    window.__handleTimelineMsg = handleTimelineMsg;
+    // Keep a soft re-hook for older paths, but primary delivery is main onmessage
     function installWsHook() {
-      if (wsMsgHookInstalled) return;
-      var tries = 0;
-      var iv = setInterval(function () {
-        tries++;
-        try {
-          if (typeof ws !== 'undefined' && ws && ws.onmessage) {
-            var prev = ws.onmessage;
-            ws.onmessage = function (ev) {
-              try {
-                var msg = typeof ev.data === 'string' ? JSON.parse(ev.data) : null;
-                if (msg) handleTimelineMsg(msg);
-              } catch (_) {}
-              return prev.call(this, ev);
-            };
-            wsMsgHookInstalled = true;
-            clearInterval(iv);
-          }
-        } catch (_) {}
-        if (tries > 60) clearInterval(iv);
-      }, 400);
+      /* no-op: timeline handled in connectWS onmessage via window.__handleTimelineMsg */
     }
     installWsHook();
 

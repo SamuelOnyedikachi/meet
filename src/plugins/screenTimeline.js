@@ -27,9 +27,21 @@ module.exports = {
     }
 
     ctx.onWs('screen-timeline-add', ({ msg, participantId, meeting, meetingCode }) => {
-      if (!canEdit(meeting, participantId)) return;
+      if (!canEdit(meeting, participantId)) {
+        console.warn('[screenTimeline] add denied for', participantId);
+        try {
+          const { sendToParticipant } = ctx;
+          if (sendToParticipant) {
+            sendToParticipant(participantId, { type: 'error', error: 'Not allowed to add timeline images' });
+          }
+        } catch (_) {}
+        return;
+      }
       const st = ensure(meeting);
-      if (!msg.item || !msg.item.dataUrl) return;
+      if (!msg.item || !msg.item.dataUrl) {
+        console.warn('[screenTimeline] add missing dataUrl');
+        return;
+      }
       if (st.items.length >= 10) return;
       const item = {
         id: String(msg.item.id || ('st-' + Date.now())).slice(0, 64),
@@ -76,6 +88,19 @@ module.exports = {
         st.selected = msg.index;
         broadcast(meetingCode, { type: 'screen-timeline-select', index: st.selected }, participantId);
       }
+    });
+
+    ctx.onWs('screen-timeline-request', ({ meeting, ws }) => {
+      if (!meeting || !ws) return;
+      const st = ensure(meeting);
+      try {
+        ws.send(JSON.stringify({
+          type: 'screen-timeline-state',
+          items: st.items,
+          slideshow: st.slideshow,
+          selected: st.selected || 0,
+        }));
+      } catch (_) {}
     });
 
     ctx.onRegister((ws, meeting) => {
