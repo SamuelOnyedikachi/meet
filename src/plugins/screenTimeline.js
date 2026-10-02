@@ -50,13 +50,14 @@ module.exports = {
         ownerName: String(msg.item.ownerName || meeting.participants.get(participantId)?.name || 'Host').slice(0, 64),
       };
       st.items.push(item);
+      // Keep current selection; only default to 0 on the first image
       if (st.items.length === 1) st.selected = 0;
-      broadcast(meetingCode, { type: 'screen-timeline-add', item });
+      // Single event — avoid add + full state (that caused rapid image flicker)
       broadcast(meetingCode, {
-        type: 'screen-timeline-state',
-        items: st.items,
-        slideshow: st.slideshow,
+        type: 'screen-timeline-add',
+        item,
         selected: st.selected,
+        count: st.items.length,
       });
     });
 

@@ -6336,10 +6336,18 @@
       });
     }
 
-    function showTimelineImage(idx) {
+    var _lastShownTimelineId = null;
+    var _selectBroadcastTimer = null;
+    function showTimelineImage(idx, opts) {
+      opts = opts || {};
       if (!screenTimeline[idx]) return;
-      slideshowIdx = idx;
       var item = screenTimeline[idx];
+      // Skip redundant redraw of the same image (stops glitch flicker)
+      if (!opts.force && item.id && item.id === _lastShownTimelineId && slideshowIdx === idx) {
+        return;
+      }
+      slideshowIdx = idx;
+      _lastShownTimelineId = item.id || null;
       var img = document.getElementById('contentImage');
       var placeholder = document.getElementById('bigPlaceholder');
       var contentView = document.getElementById('contentView');
@@ -6352,11 +6360,16 @@
       if (lkVid) lkVid.style.display = 'none';
       if (contentView) contentView.classList.remove('hidden');
       if (img) {
-        img.src = item.dataUrl;
+        // Only reset src when the image actually changes
+        if (img.getAttribute('src') !== item.dataUrl) {
+          img.src = item.dataUrl;
+        }
         img.classList.remove('hidden');
         img.classList.add('timeline-zoomable');
-        img.style.transform = 'scale(1)';
-        img.dataset.zoom = '1';
+        if (!opts.keepZoom) {
+          img.style.transform = 'scale(1)';
+          img.dataset.zoom = '1';
+        }
       }
       if (placeholder) placeholder.classList.add('hidden');
       ['contentFrame', 'pdfCanvasWrap', 'localMediaVideo'].forEach(function (id) {
@@ -6373,7 +6386,13 @@
       renderTimelineSlots();
       try { if (typeof renderCards === 'function') renderCards(); } catch (_) {}
       try { if (typeof window.__updateNavBadges === 'function') window.__updateNavBadges(); } catch (_) {}
-      try { sendWS({ type: 'screen-timeline-select', index: slideshowIdx }); } catch (_) {}
+      // Debounced select broadcast — avoid storm when many images arrive
+      if (!opts.silent) {
+        if (_selectBroadcastTimer) clearTimeout(_selectBroadcastTimer);
+        _selectBroadcastTimer = setTimeout(function () {
+          try { sendWS({ type: 'screen-timeline-select', index: slideshowIdx }); } catch (_) {}
+        }, 120);
+      }
     }
 
     function ensureTimelineNav() {
@@ -6443,15 +6462,21 @@
 
     function startSlideshow() {
       stopSlideshow();
-      if (screenTimeline.length < 2) return;
+      if (!slideshowOn || screenTimeline.length < 2) return;
       slideshowTimer = setInterval(function () {
-        slideshowIdx = (slideshowIdx + 1) % screenTimeline.length;
-        showTimelineImage(slideshowIdx);
+        if (!slideshowOn || screenTimeline.length < 2) {
+          stopSlideshow();
+          return;
+        }
+        var next = (slideshowIdx + 1) % screenTimeline.length;
+        showTimelineImage(next, { silent: true });
       }, 5000);
     }
     function stopSlideshow() {
-      if (slideshowTimer) clearInterval(slideshowTimer);
-      slideshowTimer = null;
+      if (slideshowTimer) {
+        clearInterval(slideshowTimer);
+        slideshowTimer = null;
+      }
     }
 
     async function addTimelineImages(fileList) {
@@ -6497,8 +6522,13 @@
       renderTimelineSlots();
       try { if (typeof renderCards === 'function') renderCards(); } catch (_) {}
       refreshDynScreens();
-      if (screenTimeline.length) showTimelineImage(Math.max(0, screenTimeline.length - files.length));
-      if (slideshowOn) startSlideshow();
+      // Stay on the first newly added image (or current) — do not cycle through batch
+      if (screenTimeline.length) {
+        var startIdx = Math.max(0, screenTimeline.length - Math.max(sent, files.length));
+        if (_lastShownTimelineId == null) showTimelineImage(startIdx, { silent: true });
+        else renderTimelineSlots();
+      }
+      if (slideshowOn) startSlideshow(); else stopSlideshow();
       if (sent && typeof showToast === 'function') showToast(sent === 1 ? 'Image shared to meeting' : sent + ' images shared');
     }
 
@@ -6581,26 +6611,52 @@
       if (!msg || !msg.type) return false;
       if (msg.type === 'screen-timeline-add' && msg.item) {
         if (!screenTimeline.some(function (x) { return x.id === msg.item.id; })) {
+          var wasEmpty = screenTimeline.length === 0;
           screenTimeline.push(msg.item);
           if (screenTimeline.length > 10) screenTimeline = screenTimeline.slice(-10);
           renderTimelineSlots();
           try { if (typeof renderCards === 'function') renderCards(); } catch (_) {}
           refreshDynScreens();
-          // Auto-show for viewers when first image arrives or when not watching live share
+          // Only auto-display the FIRST image. Extra images stay available on the card/slots —
+          // do not jump index (that looked like a hyper slideshow when slideshow is off).
           var liveShare = false;
           try { liveShare = (participants || []).some(function (p) { return p.sharing; }) || !!isSharing; } catch (_) {}
-          if (!liveShare) showTimelineImage(screenTimeline.length - 1);
+          if (wasEmpty && !liveShare) {
+            showTimelineImage(0, { silent: true });
+          } else {
+            // Keep current view stable; just refresh slot highlights
+            renderTimelineSlots();
+          }
         }
         return true;
       }
       if (msg.type === 'screen-timeline-remove' && msg.id) {
+        var removedCurrent = screenTimeline[slideshowIdx] && screenTimeline[slideshowIdx].id === msg.id;
         screenTimeline = screenTimeline.filter(function (x) { return x.id !== msg.id; });
+        if (slideshowIdx >= screenTimeline.length) slideshowIdx = Math.max(0, screenTimeline.length - 1);
         renderTimelineSlots();
+        try { if (typeof renderCards === 'function') renderCards(); } catch (_) {}
+        refreshDynScreens();
+        if (!screenTimeline.length) {
+          _lastShownTimelineId = null;
+        } else if (removedCurrent) {
+          showTimelineImage(slideshowIdx, { silent: true });
+        }
         return true;
       }
       if (msg.type === 'screen-timeline-state' && Array.isArray(msg.items)) {
-        screenTimeline = msg.items.slice(0, 10);
-        slideshowOn = !!msg.slideshow;
+        var prevId = screenTimeline[slideshowIdx] && screenTimeline[slideshowIdx].id;
+        var nextItems = msg.items.slice(0, 10);
+        // Avoid full redraw storm if state is identical
+        var same = nextItems.length === screenTimeline.length &&
+          nextItems.every(function (it, i) { return screenTimeline[i] && screenTimeline[i].id === it.id; });
+        var nextSelected = (typeof msg.selected === 'number') ? msg.selected : slideshowIdx;
+        var nextSlide = !!msg.slideshow;
+        if (same && nextSelected === slideshowIdx && nextSlide === slideshowOn) {
+          return true; // no-op
+        }
+        screenTimeline = nextItems;
+        slideshowOn = nextSlide;
         if (typeof msg.selected === 'number') slideshowIdx = msg.selected;
         document.querySelectorAll('#stSlideshowToggle, #stSlideshowToggleDesktop, #stSlideshowToggleSide').forEach(function (x) {
           x.checked = slideshowOn;
@@ -6609,14 +6665,19 @@
         try { if (typeof renderCards === 'function') renderCards(); } catch (_) {}
         refreshDynScreens();
         if (screenTimeline.length) {
-          showTimelineImage(Math.min(slideshowIdx, Math.max(0, screenTimeline.length - 1)));
+          var idx = Math.min(Math.max(0, slideshowIdx), screenTimeline.length - 1);
+          var nextId = screenTimeline[idx] && screenTimeline[idx].id;
+          // Only change the big view when the shown image actually changes
+          if (nextId !== prevId || nextId !== _lastShownTimelineId) {
+            showTimelineImage(idx, { silent: true });
+          }
         }
-        if (slideshowOn) startSlideshow();
+        if (slideshowOn) startSlideshow(); else stopSlideshow();
         return true;
       }
       if (msg.type === 'screen-timeline-slideshow') {
         slideshowOn = !!msg.on;
-        document.querySelectorAll('#stSlideshowToggle, #stSlideshowToggleDesktop').forEach(function (x) {
+        document.querySelectorAll('#stSlideshowToggle, #stSlideshowToggleDesktop, #stSlideshowToggleSide').forEach(function (x) {
           x.checked = slideshowOn;
         });
         if (slideshowOn) startSlideshow(); else stopSlideshow();
@@ -6624,14 +6685,16 @@
       }
       if (msg.type === 'screen-timeline-select' && typeof msg.index === 'number') {
         if (screenTimeline[msg.index]) {
+          if (slideshowIdx === msg.index && _lastShownTimelineId === (screenTimeline[msg.index].id || null)) {
+            return true; // already showing
+          }
           slideshowIdx = msg.index;
-          // Only auto-show if not currently watching a live share
           var someoneSharing = false;
           try {
             someoneSharing = (typeof participants !== 'undefined') && participants.some(function (p) { return p.sharing; });
           } catch (_) {}
           if (!someoneSharing && !(typeof isSharing !== 'undefined' && isSharing)) {
-            showTimelineImage(msg.index);
+            showTimelineImage(msg.index, { silent: true });
           } else {
             renderTimelineSlots();
           }
