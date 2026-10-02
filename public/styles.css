@@ -5244,6 +5244,7 @@ body.in-meeting-mobile.sec-in-panel #securityDrawer {
   font-weight: 650;
   font-size: 0.95rem;
   line-height: 1.35;
+  color: var(--text, #111);
 }
 .toast-line2 {
   display: flex;
@@ -5254,7 +5255,8 @@ body.in-meeting-mobile.sec-in-panel #securityDrawer {
   border-radius: 10px;
   padding: 0.55rem 0.75rem;
   border: 1px solid var(--border);
-  background: var(--surface);
+  background: var(--surface, #fff);
+  color: #111; /* light mode: black text on white dismiss */
   font-weight: 600;
   cursor: pointer;
 }
@@ -5262,6 +5264,21 @@ body.in-meeting-mobile.sec-in-panel #securityDrawer {
   background: var(--primary);
   color: #fff;
   border-color: transparent;
+}
+/* Dark mode: main sentence white; dismiss stays readable */
+html.dark .toast.toast-unmute-ask .toast-line1,
+body.dark .toast.toast-unmute-ask .toast-line1 {
+  color: #fff;
+}
+html.dark .toast.toast-unmute-ask .toast-line2 .toast-btn:not(.primary),
+body.dark .toast.toast-unmute-ask .toast-line2 .toast-btn:not(.primary) {
+  background: rgba(255,255,255,.12);
+  color: #fff;
+  border-color: rgba(255,255,255,.2);
+}
+html.dark .toast.toast-unmute-ask .toast-line2 .toast-btn.primary,
+body.dark .toast.toast-unmute-ask .toast-line2 .toast-btn.primary {
+  color: #fff;
 }
 
 /* Timeline nav arrows + zoom */
@@ -5367,13 +5384,33 @@ body.in-meeting-mobile.sec-in-panel #securityDrawer {
 
 
 /* People lists: full available height (desktop sidebar + mobile dynamic panel) */
-#peopleTab.side-tab-panel,
+#peopleTab.side-tab-panel.hidden {
+  display: none !important;
+}
 #peopleTab.side-tab-panel.active {
   display: flex !important;
   flex-direction: column;
   min-height: 0;
   height: 100%;
   overflow: hidden; /* toolbar sticky; list scrolls */
+}
+/* Ensure exclusive panels — never stack people under other tabs */
+.side-tab-panel.hidden {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  height: 0 !important;
+  overflow: hidden !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+.side-tab-panel.active:not(.hidden) {
+  display: flex !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+  height: auto;
+  flex: 1;
+  min-height: 0;
 }
 #peopleTab .tab-toolbar {
   position: sticky;
@@ -5393,7 +5430,10 @@ body.in-meeting-mobile.sec-in-panel #securityDrawer {
 }
 
 /* Dynamic panel people */
-#dynPanePeople {
+#dynPanePeople.hidden {
+  display: none !important;
+}
+#dynPanePeople:not(.hidden) {
   display: flex !important;
   flex-direction: column;
   min-height: 0;
@@ -5462,4 +5502,35 @@ body.in-meeting-mobile.sec-in-panel #securityDrawer {
   height: 24px;
   object-fit: cover;
   border-radius: 4px;
+}
+
+
+/* Footer / toolbar counter badges always positioned */
+.mfn-btn, .call-btn {
+  position: relative;
+}
+.mfn-btn .mfn-badge,
+.call-btn .mfn-badge,
+.call-btn .call-badge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  transform: translate(25%, -25%);
+  min-width: 1.05rem;
+  height: 1.05rem;
+  padding: 0 0.28rem;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 1.05rem;
+  text-align: center;
+  background: var(--primary, #6366f1);
+  color: #fff;
+  z-index: 3;
+  pointer-events: none;
+}
+.desktop-only .call-btn .call-badge {
+  top: 2px;
+  right: 4px;
+  transform: none;
 }

@@ -4988,6 +4988,18 @@
         const on = p.dataset.tab === name;
         p.classList.toggle("active", on);
         p.classList.toggle("hidden", !on);
+        // Inline style beats any leftover !important layout rules
+        if (on) {
+          p.style.display = 'flex';
+          p.style.visibility = 'visible';
+          p.style.height = '';
+          p.style.overflow = '';
+        } else {
+          p.style.display = 'none';
+          p.style.visibility = 'hidden';
+          p.style.height = '0';
+          p.style.overflow = 'hidden';
+        }
       });
       if (name === "notifications") renderNotifications();
       if (name === "chat") {
@@ -5376,8 +5388,24 @@
         reactions: 'Reactions', security: 'Security', more: 'More'
       }[activePane] || 'Panel');
       document.querySelectorAll('.dyn-pane').forEach(function (p) {
-        p.classList.toggle('hidden', p.getAttribute('data-pane') !== activePane);
+        var on = p.getAttribute('data-pane') === activePane;
+        p.classList.toggle('hidden', !on);
+        if (on) {
+          p.style.display = '';
+          p.style.visibility = '';
+        } else {
+          p.style.display = 'none';
+          p.style.visibility = 'hidden';
+        }
       });
+      // Prevent people list from leaking into other panes
+      if (activePane !== 'people') {
+        var dp = document.getElementById('dynPanePeople');
+        if (dp && activePane !== 'people') {
+          dp.classList.add('hidden');
+          dp.style.display = 'none';
+        }
+      }
       if (panel) panel.classList.add('open');
       document.querySelectorAll('.mfn-btn[data-pane]').forEach(function (b) {
         b.classList.toggle('active', b.getAttribute('data-pane') === activePane);
