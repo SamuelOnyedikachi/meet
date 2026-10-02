@@ -5030,3 +5030,19 @@ body.in-meeting-mobile.sec-in-panel #securityDrawer {
   width: 28px; height: 20px; object-fit: cover; border-radius: 4px;
   margin-right: 4px;
 }
+
+
+/* Desktop: timeline lives in sidebar 4th tab */
+@media (min-width: 901px) {
+  #desktopScreenTimeline { display: none !important; }
+  #timelineTab .screen-timeline { border: none; background: transparent; padding: 0.5rem; }
+  #timelineTab .st-slots { min-height: 64px; }
+  .dyn-more-btn { width: 100%; text-align: left; }
+  .dyn-sub-title { margin: 0 0 0.5rem; font-size: 0.95rem; }
+  .dyn-quality { margin: 0.35rem 0; }
+}
+
+/* Footer no longer has more — slightly more space per icon */
+@media (max-width: 900px) {
+  .mobile-footer-nav .mfn-btn { width: 44px; }
+}

@@ -796,13 +796,17 @@
         return;
       }
       if (msg.type === 'chat') {
-        appendChatMessage(msg);
+        appendChatMessage(msg); try { if (typeof window.__syncAllChatSurfaces === 'function') window.__syncAllChatSurfaces(); } catch (_) {}
         return;
       }
       if (msg.type === 'chat-history') {
         var box = $('chatMessages');
         if (box) box.innerHTML = '';
         (msg.messages || []).forEach(function (m) { appendChatMessage(m); });
+        // Sync mobile/tablet chat surfaces so history shows without needing to send first
+        try {
+          if (typeof window.__syncAllChatSurfaces === 'function') window.__syncAllChatSurfaces();
+        } catch (_) {}
         return;
       }
       if (msg.type === 'reaction') {
@@ -819,6 +823,7 @@
           ensureModPermissions(msg.permissions);
         }
         try { updateShareButton(); } catch (_) {}
+        try { if (typeof window.__syncMobileChrome === 'function') window.__syncMobileChrome(); } catch (_) {}
         // If screen share revoked while sharing, stop locally
         if (isSharing && myPermissions && myPermissions.screenShare === false &&
             myRole !== 'host' && myRole !== 'cohost') {
@@ -3762,6 +3767,7 @@
         html += `<label class="perm-row"><span>Microphone</span><input type="checkbox" data-perm="microphone" ${pp.microphone !== false ? 'checked' : ''}></label>`;
         html += `<label class="perm-row"><span>Screen share</span><input type="checkbox" data-perm="screenShare" ${pp.screenShare !== false ? 'checked' : ''}></label>`;
         html += `<label class="perm-row"><span>Chat</span><input type="checkbox" data-perm="chat" ${pp.chat !== false ? 'checked' : ''}></label>`;
+        html += `<label class="perm-row"><span>Screen timeline</span><input type="checkbox" data-perm="screenTimeline" ${pp.screenTimeline ? 'checked' : ''}></label>`;
       }
       if (myRole === 'host' && role !== 'host') {
         html += `<button type="button" data-act="transfer-host"><i class="fa-solid fa-crown"></i> Transfer host</button>`;
@@ -4015,10 +4021,14 @@
   function openChatSheet() {
     const sheet = document.getElementById('chatSheet');
     if (!sheet) return;
+    try { sendWS({ type: 'chat-history-request' }); } catch (_) {}
     // Sync messages from main chat
     const src = document.getElementById('chatMessages');
     const dest = document.getElementById('chatSheetMessages');
-    if (src && dest) dest.innerHTML = src.innerHTML;
+    if (src && dest) {
+      dest.innerHTML = src.innerHTML;
+      try { dest.scrollTop = dest.scrollHeight; } catch (_) {}
+    }
     sheet.classList.remove('hidden');
     sheet.setAttribute('aria-hidden', 'false');
     const input = document.getElementById('chatSheetInput');
@@ -4790,6 +4800,13 @@
         if (box) box.scrollTop = box.scrollHeight;
         const badge = $("chatUnreadBadge");
         if (badge) { badge.textContent = "0"; badge.classList.add("hidden"); }
+        try { sendWS({ type: 'chat-history-request' }); } catch (_) {}
+      }
+      if (name === "timeline") {
+        try {
+          if (typeof window.__syncMobileChrome === 'function') window.__syncMobileChrome();
+          if (typeof renderCards === 'function') renderCards();
+        } catch (_) {}
       }
     }
     tabs.forEach((t) => t.addEventListener("click", () => switchTab(t.dataset.tab)));
@@ -5133,6 +5150,18 @@
      ========================================================= */
   (function mobileMeetUX() {
     var screenTimeline = [];
+    window.__syncAllChatSurfaces = function () {
+      var src = document.getElementById('chatMessages');
+      if (!src) return;
+      var html = src.innerHTML;
+      ['dynChatMessages', 'chatSheetMessages'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        el.innerHTML = html;
+        try { el.scrollTop = el.scrollHeight; } catch (_) {}
+      });
+    };
+
     var slideshowOn = false;
     var slideshowTimer = null;
     var slideshowIdx = 0;
@@ -5200,7 +5229,7 @@
         mfnSec.classList.toggle('hidden', sec.classList.contains('hidden'));
       }
       var canEdit = canEditTimeline();
-      ['stActions', 'stActionsDesktop'].forEach(function (id) {
+      ['stActions', 'stActionsDesktop', 'stActionsSide'].forEach(function (id) {
         var el = document.getElementById(id);
         if (el) {
           el.classList.toggle('hidden', !canEdit);
@@ -5237,10 +5266,6 @@
     document.getElementById('mfnSecurity')?.addEventListener('click', function () {
       if (isMobileLayout()) openDynamicPane('security', 'Security');
       else document.getElementById('securityBtn')?.click();
-    });
-    document.getElementById('mfnMore')?.addEventListener('click', function () {
-      if (isMobileLayout()) openDynamicPane('more', 'More');
-      else document.getElementById('meetingMoreBtn')?.click();
     });
     document.getElementById('mobileMeetMoreBtn')?.addEventListener('click', function () {
       openDynamicPane('more', 'More');
@@ -5289,7 +5314,7 @@
       // Also ensure timeline slots + host-only add controls
       renderTimelineSlots();
       var canEdit = canEditTimeline();
-      ['stActions', 'stActionsDesktop'].forEach(function (id) {
+      ['stActions', 'stActionsDesktop', 'stActionsSide'].forEach(function (id) {
         var el = document.getElementById(id);
         if (el) el.classList.toggle('hidden', !canEdit);
       });
@@ -5299,11 +5324,15 @@
       var pane = document.getElementById('dynPaneChat');
       if (!pane) return;
       var src = document.getElementById('chatMessages');
+      // Request history so mobile sees older messages without needing to send first
+      try { sendWS({ type: 'chat-history-request' }); } catch (_) {}
       pane.innerHTML = '';
       var msgs = document.createElement('div');
       msgs.className = 'chat-messages';
       msgs.id = 'dynChatMessages';
       if (src) msgs.innerHTML = src.innerHTML;
+      // Scroll to bottom after paint
+      setTimeout(function () { try { msgs.scrollTop = msgs.scrollHeight; } catch (_) {} }, 50);
       pane.appendChild(msgs);
       var form = document.createElement('form');
       form.className = 'chat-form';
@@ -5359,70 +5388,158 @@
       var pane = document.getElementById('dynPaneMore');
       if (!pane) return;
       pane.innerHTML = '';
-      // 1) Topbar moreMenu items (copy code, share, theme, history, leave, etc.)
-      var topMore = document.getElementById('moreMenu');
-      if (topMore) {
-        try { if (typeof syncMoreMenuInCall === 'function') syncMoreMenuInCall(); } catch (_) {}
-        var section = document.createElement('div');
-        section.className = 'dyn-more-section';
-        topMore.querySelectorAll('.more-item').forEach(function (btn) {
-          if (btn.classList.contains('hidden')) return;
-          var b = document.createElement('button');
-          b.type = 'button';
-          b.className = 'more-item';
-          b.innerHTML = btn.innerHTML;
-          var act = btn.getAttribute('data-action');
-          b.setAttribute('data-action', act || '');
-          b.addEventListener('click', function () {
-            // Trigger original handler path
-            btn.click();
-          });
-          section.appendChild(b);
-        });
-        pane.appendChild(section);
+      try { if (typeof syncMoreMenuInCall === 'function') syncMoreMenuInCall(); } catch (_) {}
+
+      function addItem(label, icon, onClick) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'more-item dyn-more-btn';
+        b.innerHTML = '<i class="fa-solid ' + icon + '"></i> ' + label;
+        b.addEventListener('click', onClick);
+        pane.appendChild(b);
       }
-      // 2) Meeting controls more panel (reactions, quality, connection, activity, record, invite)
-      var more = document.getElementById('meetingMorePanel');
-      if (more) {
-        var sep = document.createElement('div');
-        sep.className = 'more-sep';
-        pane.appendChild(sep);
-        var clone = more.cloneNode(true);
-        clone.classList.remove('hidden');
-        clone.id = '';
-        clone.style.position = 'static';
-        clone.style.boxShadow = 'none';
-        clone.style.border = 'none';
-        clone.style.display = 'block';
-        clone.querySelectorAll('[id]').forEach(function (el) { el.removeAttribute('id'); });
-        // Wire selects to originals by syncing values
-        var origSend = document.getElementById('sendQualitySelect');
-        var origView = document.getElementById('viewQualitySelect');
-        clone.querySelectorAll('select').forEach(function (sel, i) {
-          sel.addEventListener('change', function () {
-            var target = i === 0 ? origSend : origView;
-            if (target) { target.value = sel.value; target.dispatchEvent(new Event('change', { bubbles: true })); }
-          });
+      function addSep() {
+        var s = document.createElement('div');
+        s.className = 'more-sep';
+        pane.appendChild(s);
+      }
+
+      // Reactions open inline (no overlay X)
+      addItem('Reactions', 'fa-heart', function () {
+        openDynamicPane('reactions', 'Reactions');
+      });
+      addSep();
+      addItem('Copy meeting code', 'fa-copy', function () {
+        var btn = document.querySelector('#moreMenu [data-action="copy-code"]') || document.getElementById('copyCodeBtn');
+        if (btn) btn.click();
+        else if (currentMeeting) {
+          var code = (currentMeeting.letters || '') + (currentMeeting.numbers || currentMeeting.code || '');
+          try { navigator.clipboard.writeText(code); showToast && showToast('Code copied'); } catch (_) {}
+        }
+      });
+      addItem('Share invite link', 'fa-link', function () {
+        var btn = document.querySelector('#moreMenu [data-action="share-link"]') || document.getElementById('shareLinkBtn');
+        if (btn) btn.click();
+      });
+      addSep();
+      addItem('Connection', 'fa-signal', function () {
+        // Render connection status in panel
+        pane.innerHTML = '';
+        var title = document.createElement('h4');
+        title.className = 'dyn-sub-title';
+        title.textContent = 'Connection';
+        pane.appendChild(title);
+        var live = document.getElementById('liveStatusText');
+        var p = document.createElement('p');
+        p.className = 'st-empty';
+        p.textContent = (live && live.textContent) || 'Checking…';
+        pane.appendChild(p);
+        var back = document.createElement('button');
+        back.type = 'button';
+        back.className = 'btn small-btn';
+        back.textContent = 'Back';
+        back.addEventListener('click', fillDynMore);
+        pane.appendChild(back);
+        document.getElementById('moreConnectionBtn')?.click();
+      });
+      addItem('Activity', 'fa-list', function () {
+        document.getElementById('moreActivityBtn')?.click();
+        // Pull activity into panel if drawer exists
+        var body = document.querySelector('#activityDrawer .drawer-body, #activityList');
+        if (body) {
+          pane.innerHTML = '';
+          var h = document.createElement('h4');
+          h.className = 'dyn-sub-title';
+          h.textContent = 'Meeting activity';
+          pane.appendChild(h);
+          var clone = body.cloneNode(true);
+          clone.querySelectorAll('[id]').forEach(function (el) { el.removeAttribute('id'); });
+          pane.appendChild(clone);
+          var back = document.createElement('button');
+          back.type = 'button';
+          back.className = 'btn small-btn';
+          back.textContent = 'Back';
+          back.addEventListener('click', fillDynMore);
+          pane.appendChild(back);
+        }
+      });
+      addItem('Record', 'fa-circle', function () {
+        document.getElementById('moreRecordBtn')?.click();
+      });
+      addItem('Invite', 'fa-user-plus', function () {
+        var inv = document.querySelector('#moreMenu [data-action="invite"]') || document.getElementById('moreInviteBtn');
+        if (inv) inv.click();
+      });
+      addSep();
+      addItem('Theme', 'fa-moon', function () {
+        document.querySelector('#moreMenu [data-action="theme"]')?.click();
+      });
+      addItem('Fullscreen', 'fa-expand', function () {
+        document.querySelector('#moreMenu [data-action="fullscreen"]')?.click()
+          || document.getElementById('fullscreenBtn')?.click();
+      });
+      addItem('History', 'fa-clock-rotate-left', function () {
+        showHistory();
+      });
+      addSep();
+      // Quality controls inline
+      var qWrap = document.createElement('div');
+      qWrap.className = 'quality-block dyn-quality';
+      qWrap.innerHTML = '<div class="more-section-label">Media quality</div>';
+      var origSend = document.getElementById('sendQualitySelect');
+      var origView = document.getElementById('viewQualitySelect');
+      if (origSend) {
+        var lab = document.createElement('label');
+        lab.innerHTML = '<span>Your screen</span>';
+        var sel = origSend.cloneNode(true);
+        sel.id = 'dynSendQuality';
+        sel.value = origSend.value;
+        sel.addEventListener('change', function () {
+          origSend.value = sel.value;
+          origSend.dispatchEvent(new Event('change', { bubbles: true }));
         });
-        clone.querySelectorAll('.emoji-btn').forEach(function (btn) {
-          btn.addEventListener('click', function () {
-            var emoji = btn.getAttribute('data-emoji');
-            if (emoji) try { sendWS({ type: 'reaction', emoji: emoji }); } catch (_) {}
-          });
+        lab.appendChild(sel);
+        qWrap.appendChild(lab);
+      }
+      if (origView) {
+        var lab2 = document.createElement('label');
+        lab2.innerHTML = '<span>Incoming</span>';
+        var sel2 = origView.cloneNode(true);
+        sel2.id = 'dynViewQuality';
+        sel2.value = origView.value;
+        sel2.addEventListener('change', function () {
+          origView.value = sel2.value;
+          origView.dispatchEvent(new Event('change', { bubbles: true }));
         });
-        clone.querySelectorAll('.more-item').forEach(function (btn) {
-          var act = btn.getAttribute('data-act');
-          btn.addEventListener('click', function () {
-            var orig = document.querySelector('#meetingMorePanel .more-item[data-act="' + act + '"]');
-            if (orig) orig.click();
-            else if (act === 'connection') document.getElementById('moreConnectionBtn')?.click();
-            else if (act === 'activity') document.getElementById('moreActivityBtn')?.click();
-            else if (act === 'record') document.getElementById('moreRecordBtn')?.click();
-            else if (act === 'invite') document.getElementById('moreInviteBtn')?.click();
-            else if (act === 'fullscreen') document.getElementById('moreFullscreenBtn')?.click();
-          });
+        lab2.appendChild(sel2);
+        qWrap.appendChild(lab2);
+      }
+      pane.appendChild(qWrap);
+      addSep();
+      // Auth / leave
+      var inCall = !!(currentMeeting);
+      if (inCall) {
+        addItem('Leave call', 'fa-right-from-bracket', function () {
+          document.getElementById('leaveBtn')?.click() || document.querySelector('#moreMenu [data-action="leave"]')?.click();
         });
-        pane.appendChild(clone);
+        if (currentMeeting.isHost || myRole === 'host' || myRole === 'cohost') {
+          addItem('End for everyone', 'fa-phone-slash', function () {
+            document.querySelector('#moreMenu [data-action="end-meeting"]')?.click()
+              || document.getElementById('endMeetBtn')?.click();
+          });
+        }
+      }
+      var loginBtn = document.querySelector('#moreMenu [data-action="login"]');
+      var signupBtn = document.querySelector('#moreMenu [data-action="signup"]');
+      var logoutBtn = document.querySelector('#moreMenu [data-action="logout"]');
+      if (loginBtn && !loginBtn.classList.contains('hidden')) {
+        addItem('Log in', 'fa-right-to-bracket', function () { loginBtn.click(); });
+      }
+      if (signupBtn && !signupBtn.classList.contains('hidden')) {
+        addItem('Sign up', 'fa-user-plus', function () { signupBtn.click(); });
+      }
+      if (logoutBtn && !logoutBtn.classList.contains('hidden')) {
+        addItem('Log out', 'fa-right-from-bracket', function () { logoutBtn.click(); });
       }
     }
 
@@ -5435,40 +5552,41 @@
       var pane = document.getElementById('dynPaneSecurity');
       if (!pane) return;
       document.body.classList.add('sec-in-panel');
+      // Apply current security state onto the real form first
+      try {
+        if (typeof applySecurityToForm === 'function') applySecurityToForm(securityState);
+      } catch (_) {}
       pane.innerHTML = '';
       var drawerBody = document.querySelector('#securityDrawer .drawer-body');
       if (!drawerBody) {
         pane.innerHTML = '<p class="st-empty">Security controls unavailable.</p>';
         return;
       }
-      // Move live controls into panel (keep same IDs so existing JS still works)
-      var wrap = document.createElement('div');
-      wrap.className = 'dyn-security-wrap';
-      // Clone structure but keep working by re-parenting the real body temporarily
-      var host = document.createElement('div');
-      host.className = 'security-panel dyn-sec-panel';
-      // Use the real drawer body in-place via adopt
-      var placeholder = document.createElement('div');
-      placeholder.id = 'secBodyPlaceholder';
-      placeholder.style.display = 'none';
-      if (!drawerBody.dataset.dynMoved) {
-        drawerBody.parentNode.insertBefore(placeholder, drawerBody);
-        host.appendChild(drawerBody);
-        drawerBody.dataset.dynMoved = '1';
-      } else {
-        host.appendChild(drawerBody);
-      }
-      pane.appendChild(host);
+      // Deep clone preserving checkbox checked state from the live form
+      var clone = drawerBody.cloneNode(true);
+      clone.querySelectorAll('input[type="checkbox"]').forEach(function (inp) {
+        var orig = document.getElementById(inp.id);
+        if (orig) {
+          inp.checked = !!orig.checked;
+          if (inp.checked) inp.setAttribute('checked', 'checked');
+          else inp.removeAttribute('checked');
+          // Wire changes back to original so existing listeners fire
+          inp.addEventListener('change', function () {
+            orig.checked = inp.checked;
+            orig.dispatchEvent(new Event('change', { bubbles: true }));
+          });
+        }
+        // Avoid duplicate IDs in the panel clone
+        if (inp.id) inp.id = 'dyn_' + inp.id;
+      });
+      clone.querySelectorAll('[id]').forEach(function (el) {
+        if (el.tagName === 'INPUT') return;
+        el.removeAttribute('id');
+      });
+      pane.appendChild(clone);
     }
 
     function restoreSecurityBody() {
-      var body = document.querySelector('.dyn-sec-panel .drawer-body, #dynPaneSecurity .drawer-body');
-      var ph = document.getElementById('secBodyPlaceholder');
-      if (body && ph && ph.parentNode) {
-        ph.parentNode.insertBefore(body, ph);
-        ph.remove();
-        body.dataset.dynMoved = '';
-      }
       document.body.classList.remove('sec-in-panel');
     }
 
@@ -5517,12 +5635,17 @@
     }
 
     function canEditTimeline() {
-      // Guests and regular participants cannot add images unless host/cohost
-      return !!(currentMeeting && (currentMeeting.isHost || myRole === 'host' || myRole === 'cohost'));
+      if (!currentMeeting) return false;
+      if (currentMeeting.isHost || myRole === 'host' || myRole === 'cohost') return true;
+      // Participants/guests only if host/cohost enabled screenTimeline for them
+      try {
+        if (myPermissions && myPermissions.screenTimeline) return true;
+      } catch (_) {}
+      return false;
     }
 
     function renderTimelineSlots() {
-      ['stSlots', 'stSlotsDesktop'].forEach(function (id) {
+      ['stSlots', 'stSlotsDesktop', 'stSlotsSide'].forEach(function (id) {
         var slots = document.getElementById(id);
         if (!slots) return;
         slots.innerHTML = '';
@@ -5654,12 +5777,13 @@
       }
       bind('stAddImagesBtn', 'stImageInput');
       bind('stAddImagesBtnDesktop', 'stImageInputDesktop');
+      bind('stAddImagesBtnSide', 'stImageInputSide');
       function bindToggle(id) {
         var t = document.getElementById(id);
         if (!t) return;
         t.addEventListener('change', function () {
           slideshowOn = !!t.checked;
-          document.querySelectorAll('#stSlideshowToggle, #stSlideshowToggleDesktop').forEach(function (x) {
+          document.querySelectorAll('#stSlideshowToggle, #stSlideshowToggleDesktop, #stSlideshowToggleSide').forEach(function (x) {
             if (x !== t) x.checked = slideshowOn;
           });
           if (slideshowOn) startSlideshow(); else stopSlideshow();
@@ -5668,6 +5792,7 @@
       }
       bindToggle('stSlideshowToggle');
       bindToggle('stSlideshowToggleDesktop');
+      bindToggle('stSlideshowToggleSide');
     }
     wireTimelineInputs();
 

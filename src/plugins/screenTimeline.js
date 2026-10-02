@@ -14,8 +14,16 @@ module.exports = {
     function canEdit(meeting, participantId) {
       const p = meeting.participants.get(participantId);
       if (!p) return false;
-      // Host or cohost only — guests/participants cannot upload unless promoted
-      return !!(p.isHost || p.role === 'host' || p.role === 'cohost');
+      if (p.isHost || p.role === 'host' || p.role === 'cohost') return true;
+      // Per-user override from host/cohost people menu
+      if (p.permissionOverrides && p.permissionOverrides.screenTimeline) return true;
+      try {
+        const { resolvePermissions } = require('../lib/permissions');
+        const perms = resolvePermissions(meeting, p);
+        return !!perms.screenTimeline;
+      } catch (_) {
+        return false;
+      }
     }
 
     ctx.onWs('screen-timeline-add', ({ msg, participantId, meeting, meetingCode }) => {

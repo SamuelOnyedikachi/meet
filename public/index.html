@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link rel="stylesheet" href="styles.css?v=20261002mobileFirstB">
+  <link rel="stylesheet" href="styles.css?v=20261002mobileFirstC">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤝</text></svg>">
 </head>
 <body>
@@ -342,6 +342,9 @@
               <i class="fa-regular fa-bell"></i> <span class="tab-label">Notifications</span>
               <span id="notifUnreadBadge" class="count-badge hidden">0</span>
             </button>
+            <button type="button" class="side-tab" data-tab="timeline" role="tab" aria-selected="false" title="Screen timeline">
+              <i class="fa-solid fa-images"></i> <span class="tab-label">Timeline</span>
+            </button>
           </nav>
           <div class="side-tab-panels">
             <!-- PEOPLE TAB -->
@@ -405,6 +408,26 @@
               </div>
               <ul class="notifications-list" id="notificationsList"></ul>
               <p id="notificationsEmpty" class="history-empty">No notifications yet.</p>
+            </div>
+            <!-- TIMELINE TAB (desktop sidebar 4th panel) -->
+            <div class="side-tab-panel hidden" id="timelineTab" data-tab="timeline" role="tabpanel">
+              <div class="screen-timeline side-timeline" id="sideScreenTimeline">
+                <div class="st-header">
+                  <span class="st-title"><i class="fa-solid fa-images"></i> Screen timeline</span>
+                  <label class="st-slideshow-toggle" title="Slideshow on/off">
+                    <input type="checkbox" id="stSlideshowToggleSide">
+                    <span>Slideshow</span>
+                  </label>
+                </div>
+                <div class="st-slots" id="stSlotsSide">
+                  <p class="st-empty">No timeline images yet.</p>
+                </div>
+                <div class="st-actions host-cohost-only hidden" id="stActionsSide">
+                  <button type="button" class="btn small-btn primary-btn" id="stAddImagesBtnSide"><i class="fa-solid fa-plus"></i> Add images</button>
+                  <input type="file" id="stImageInputSide" accept="image/*" multiple hidden>
+                </div>
+                <p class="st-empty st-hint">Hosts can allow participants/guests to add images from the people menu.</p>
+              </div>
             </div>
           </div>
           <div id="chatPreviewOverlay" class="chat-preview-overlay hidden" aria-hidden="true">
@@ -691,10 +714,7 @@
               <button type="button" class="mfn-btn hidden" id="mfnSecurity" title="Security" aria-label="Security" data-pane="security">
                 <i class="fa-solid fa-shield-halved"></i>
               </button>
-              <button type="button" class="mfn-btn" id="mfnMore" title="More" aria-label="More" data-pane="more">
-                <i class="fa-solid fa-ellipsis"></i>
-              </button>
-            </nav>
+              </nav>
           </div>
         </div>
       </section>
@@ -1059,6 +1079,6 @@
   <script src="js/features/mute.js?v=20260924secMob1"></script>
   <script src="js/features/device-icons.js?v=20260924secMob1"></script>
   <script src="js/main.js?v=20260924secMob1"></script>
-  <script src="js/core/app.js?v=20261002mobileFirstB"></script>
+  <script src="js/core/app.js?v=20261002mobileFirstC"></script>
 </body>
 </html>
